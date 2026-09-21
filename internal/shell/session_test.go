@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ankitthakur/shellter/internal/pty"
+	"github.com/thakurankit7/shellter/internal/pty"
 )
 
 // A non-interactive one-shot shell: enough to prove the session starts a real

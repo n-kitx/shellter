@@ -3,8 +3,8 @@ package terminal
 import (
 	"testing"
 
-	"github.com/ankitthakur/shellter/internal/input"
-	"github.com/ankitthakur/shellter/internal/render"
+	"github.com/thakurankit7/shellter/internal/input"
+	"github.com/thakurankit7/shellter/internal/render"
 )
 
 // Phase 12: a tab holds a tree of panes. These drive the tree directly - there

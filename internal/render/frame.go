@@ -3,7 +3,7 @@ package render
 import (
 	"strings"
 
-	"github.com/ankitthakur/shellter/internal/text"
+	"github.com/thakurankit7/shellter/internal/text"
 )
 
 // textWidth is package text's width function, named locally so the renderer's

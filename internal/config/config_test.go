@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ankitthakur/shellter/internal/theme"
+	"github.com/thakurankit7/shellter/internal/theme"
 )
 
 func parse(t *testing.T, text string) Config {

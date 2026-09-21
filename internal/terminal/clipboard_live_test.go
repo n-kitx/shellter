@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ankitthakur/shellter/internal/render"
+	"github.com/thakurankit7/shellter/internal/render"
 )
 
 // Selection and paste against a real shell on a real PTY. The system

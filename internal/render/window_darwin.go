@@ -14,7 +14,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/ankitthakur/shellter/internal/input"
+	"github.com/thakurankit7/shellter/internal/input"
 )
 
 // The C callbacks below carry no user-data pointer, so the running Config

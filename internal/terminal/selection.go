@@ -3,7 +3,7 @@ package terminal
 import (
 	"unicode"
 
-	"github.com/ankitthakur/shellter/internal/screen"
+	"github.com/thakurankit7/shellter/internal/screen"
 )
 
 // Selecting text with the mouse.

@@ -3,10 +3,10 @@ package terminal
 import (
 	"testing"
 
-	"github.com/ankitthakur/shellter/internal/parser"
-	"github.com/ankitthakur/shellter/internal/render"
-	"github.com/ankitthakur/shellter/internal/screen"
-	"github.com/ankitthakur/shellter/internal/theme"
+	"github.com/thakurankit7/shellter/internal/parser"
+	"github.com/thakurankit7/shellter/internal/render"
+	"github.com/thakurankit7/shellter/internal/screen"
+	"github.com/thakurankit7/shellter/internal/theme"
 )
 
 func renderScreen(t *testing.T, data string, rows, cols int) render.Frame {

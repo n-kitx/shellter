@@ -6,11 +6,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ankitthakur/shellter/internal/input"
-	"github.com/ankitthakur/shellter/internal/pty"
-	"github.com/ankitthakur/shellter/internal/render"
-	"github.com/ankitthakur/shellter/internal/screen"
-	"github.com/ankitthakur/shellter/internal/shell"
+	"github.com/thakurankit7/shellter/internal/input"
+	"github.com/thakurankit7/shellter/internal/pty"
+	"github.com/thakurankit7/shellter/internal/render"
+	"github.com/thakurankit7/shellter/internal/screen"
+	"github.com/thakurankit7/shellter/internal/shell"
 )
 
 // readBufferSize is how much is asked for per read from the PTY.

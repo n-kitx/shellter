@@ -11,7 +11,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/ankitthakur/shellter/internal/pty"
+	"github.com/thakurankit7/shellter/internal/pty"
 )
 
 // Config describes the shell process to start.

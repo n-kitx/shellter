@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ankitthakur/shellter/internal/parser"
-	"github.com/ankitthakur/shellter/internal/screen"
+	"github.com/thakurankit7/shellter/internal/parser"
+	"github.com/thakurankit7/shellter/internal/screen"
 )
 
 // Phase 10 baseline for the whole pipeline: the work one redraw costs, and the

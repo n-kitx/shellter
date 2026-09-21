@@ -3,7 +3,7 @@ package screen
 import (
 	"testing"
 
-	"github.com/ankitthakur/shellter/internal/parser"
+	"github.com/thakurankit7/shellter/internal/parser"
 )
 
 // feed runs bytes through the real parser into the screen. Tests are written

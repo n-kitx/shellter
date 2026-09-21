@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ankitthakur/shellter/internal/pty"
-	"github.com/ankitthakur/shellter/internal/render"
-	"github.com/ankitthakur/shellter/internal/shell"
+	"github.com/thakurankit7/shellter/internal/pty"
+	"github.com/thakurankit7/shellter/internal/render"
+	"github.com/thakurankit7/shellter/internal/shell"
 )
 
 // Two real shells in one window, without the window: openTab starts a genuine

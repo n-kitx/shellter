@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ankitthakur/shellter/internal/parser"
+	"github.com/thakurankit7/shellter/internal/parser"
 )
 
 // TraceEnvVar names a file to write the parser's event stream to. It exists

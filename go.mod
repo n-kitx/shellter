@@ -1,4 +1,4 @@
-module github.com/ankitthakur/shellter
+module github.com/thakurankit7/shellter
 
 go 1.22.0
 

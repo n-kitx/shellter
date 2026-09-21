@@ -1,6 +1,6 @@
 package screen
 
-import "github.com/ankitthakur/shellter/internal/parser"
+import "github.com/thakurankit7/shellter/internal/parser"
 
 // Terminal modes: the switches a program flips through its output to change how
 // the terminal behaves.
