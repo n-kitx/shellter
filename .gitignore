@@ -1,0 +1,13 @@
+# Compiled test binaries, left behind by `go test -c` and `go test -o`.
+*.test
+
+# Build output.
+/shellter
+/bin/
+
+# Coverage and profiles.
+*.out
+*.prof
+
+# macOS.
+.DS_Store
