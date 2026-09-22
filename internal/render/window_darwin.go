@@ -102,14 +102,13 @@ func SetTitle(title string) {
 func SetTabs(tabs []Tab, active int, pos TabPosition) {
 	titles := make([]string, len(tabs))
 	busy := make([]byte, len(tabs))
+	dirs := make([]byte, len(tabs))
 	for i, t := range tabs {
 		// Newline is the separator, so a title may not contain one. Shell
 		// titles do not, but a program can set anything it likes.
 		titles[i] = strings.ReplaceAll(t.Title, "\n", " ")
-		busy[i] = '0'
-		if t.Activity {
-			busy[i] = '1'
-		}
+		busy[i] = flag(t.Activity)
+		dirs[i] = flag(t.Directory)
 	}
 	joined := strings.Join(titles, "\n")
 
@@ -117,9 +116,19 @@ func SetTabs(tabs []Tab, active int, pos TabPosition) {
 	defer C.free(unsafe.Pointer(cTitles))
 	cBusy := C.CString(string(busy))
 	defer C.free(unsafe.Pointer(cBusy))
+	cDirs := C.CString(string(dirs))
+	defer C.free(unsafe.Pointer(cDirs))
 
-	C.shellterSetTabs(cTitles, C.int(len(joined)), cBusy,
+	C.shellterSetTabs(cTitles, C.int(len(joined)), cBusy, cDirs,
 		C.int(len(tabs)), C.int(active), C.int(pos))
+}
+
+// flag is one per-tab boolean as the character the bar reads it back as.
+func flag(on bool) byte {
+	if on {
+		return '1'
+	}
+	return '0'
 }
 
 // SetClipboard puts text on the system pasteboard. Safe from any goroutine.

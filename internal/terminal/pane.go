@@ -169,17 +169,32 @@ func (p *pane) close() {
 // is about to print its first prompt. Naming the program rather than counting
 // the tabs means the label changes from true to more specific, instead of from
 // a placeholder to the truth.
-func label(title, fallback string) string {
+// dir reports whether the title named a directory, so that the bar can mark a
+// shell waiting at a prompt and not a program that named itself.
+func label(title, fallback string) (name string, dir bool) {
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return fallback
+		return fallback, false
 	}
 	// Titles are conventionally "user@host:path" or just a path.
 	if _, after, found := strings.Cut(title, ":"); found {
 		title = after
 	}
-	if base := filepath.Base(title); base != "" && base != "." && base != "/" {
-		return base
+	if !isPath(title) {
+		return title, false
 	}
-	return title
+	if base := filepath.Base(title); base != "" && base != "." && base != "/" {
+		return base, true
+	}
+	return title, true
+}
+
+// isPath reports whether a title is a bare path, the shape a shell gives it.
+// A program's title is prose: vim calls itself "main.go (~/src) - VIM", which
+// has a slash in it and a last component too, and is not a directory.
+func isPath(title string) bool {
+	if strings.ContainsAny(title, " \t") {
+		return false
+	}
+	return strings.HasPrefix(title, "~") || strings.Contains(title, "/")
 }

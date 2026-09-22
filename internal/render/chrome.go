@@ -52,6 +52,10 @@ type Tab struct {
 	// It is not "is a command running": a terminal cannot know that without
 	// tracking the foreground process group, which is a different feature.
 	Activity bool
+	// Directory says the title names a directory rather than a program: the
+	// tab is a shell waiting at a prompt, and the bar marks it with a ">_".
+	// A pane running vim is titled by vim, and a prompt mark there would lie.
+	Directory bool
 }
 
 // Chrome is how the window itself looks, as opposed to what the terminal puts

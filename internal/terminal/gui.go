@@ -421,9 +421,11 @@ func (g *GUI) tabViews() []render.Tab {
 		// Remember what the bar is about to be told, so that panePrinted can
 		// tell a retitle from the hundred prints that did not change anything.
 		t.shown = title
+		name, dir := label(title, g.shellName())
 		out[i] = render.Tab{
-			Title:    label(title, g.shellName()),
-			Activity: t.activity,
+			Title:     name,
+			Activity:  t.activity,
+			Directory: dir,
 		}
 	}
 	return out

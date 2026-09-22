@@ -35,10 +35,12 @@ char *shellterClipboard(void);
 //
 // The titles arrive as one string with '\n' between them, which saves
 // marshalling an array across cgo for something that changes a few times a
-// session. busy is a string of '0'/'1', one per tab. position is 0 for top and
-// 1 for left. Safe to call from any thread.
-void shellterSetTabs(const char *titles, int len, const char *busy, int count,
-                     int active, int position);
+// session. busy and dirs are strings of '0'/'1', one character per tab: busy
+// marks a tab that has printed since it was last looked at, dirs one whose
+// title is a directory. position is 0 for top and 1 for left. Safe to call from
+// any thread.
+void shellterSetTabs(const char *titles, int len, const char *busy,
+                     const char *dirs, int count, int active, int position);
 
 // The drawing primitives Go calls back into while a frame is being painted.
 // Positions are in character cells, colours are 0xRRGGBB, and flags match

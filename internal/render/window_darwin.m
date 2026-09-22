@@ -29,6 +29,7 @@ static NSTrackingArea *gTracking = nil;
 // Tab bar state. Pushed in from Go, read on the main thread only.
 static NSArray<NSString *> *gTabTitles = nil;
 static NSString *gTabBusy = @"";
+static NSString *gTabDirs = @"";
 static int gActiveTab = 0;
 static int gTabPosition = 0; // 0 top, 1 left
 static int gHoverTab = -1;   // the tab under the pointer, or -1
@@ -416,9 +417,17 @@ static int tabCount(void) { return (int)[gTabTitles count]; }
 // are.
 static BOOL tabBarVisible(void) { return tabCount() > 0; }
 
-static BOOL tabIsBusy(int i) {
-    return i >= 0 && i < (int)[gTabBusy length] && [gTabBusy characterAtIndex:i] == '1';
+// The per-tab flag strings arrive as one character each - see shellterSetTabs.
+static BOOL tabFlag(NSString *flags, int i) {
+    return i >= 0 && i < (int)[flags length] && [flags characterAtIndex:i] == '1';
 }
+
+static BOOL tabIsBusy(int i) { return tabFlag(gTabBusy, i); }
+
+// A tab named after a directory is a shell waiting at a prompt, and gets a
+// ">_" in front of it. A tab named by the program running in it does not: Go
+// decides which is which.
+static BOOL tabIsDir(int i) { return tabFlag(gTabDirs, i); }
 
 // tabWidthTop divides the bar between the tabs, within sensible limits: wide
 // enough to read, narrow enough that ten tabs still fit.
@@ -507,6 +516,32 @@ static void drawPlus(NSRect box, NSColor *color) {
     [p stroke];
 }
 
+// drawPrompt draws the shell prompt mark in front of a tab sitting at one: a
+// chevron and a cursor rule, ">_" as two strokes rather than two characters.
+// Drawn rather than typed so it scales with the pill and not with the label's
+// font, and so it lines up the same way the "x" and the "+" do.
+static void drawPrompt(NSRect box, NSColor *color) {
+    double w = 13, h = 10;
+    double x = NSMinX(box), y = NSMidY(box) - h / 2;
+
+    [color setStroke];
+    NSBezierPath *p = [NSBezierPath bezierPath];
+    [p setLineWidth:1.5];
+    [p setLineCapStyle:NSLineCapStyleRound];
+    [p setLineJoinStyle:NSLineJoinStyleRound];
+
+    // Flipped coordinates: y grows downwards, so the chevron opens rightwards
+    // by going down-then-up from the top.
+    [p moveToPoint:NSMakePoint(x + 1, y + 1.5)];
+    [p lineToPoint:NSMakePoint(x + 5.5, y + h / 2)];
+    [p lineToPoint:NSMakePoint(x + 1, y + h - 1.5)];
+
+    // The cursor rule sits on the same baseline the chevron ends on.
+    [p moveToPoint:NSMakePoint(x + 7.5, y + h - 1.5)];
+    [p lineToPoint:NSMakePoint(x + w - 0.5, y + h - 1.5)];
+    [p stroke];
+}
+
 // drawLabel centres one line of text vertically in a rect, truncating the
 // front: a tab is usually a path, and the end of a path is the useful half.
 static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, BOOL centred) {
@@ -552,13 +587,20 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
             fillPill(r, chromeHoverBG());
         }
 
-        // A dot for a tab that is still running something.
+        // A dot for a tab that is still running something, then a prompt mark
+        // if the title is a directory. Both sit ahead of the label, so the
+        // label starts wherever they left off.
         double textLeft = r.origin.x + 11;
         if (tabIsBusy(i)) {
             NSRect dot = NSMakeRect(textLeft, NSMidY(r) - 3, 6, 6);
             [chromeAccent() setFill];
             [[NSBezierPath bezierPathWithOvalInRect:dot] fill];
             textLeft += 12;
+        }
+        if (tabIsDir(i)) {
+            drawPrompt(NSMakeRect(textLeft, r.origin.y, 13, r.size.height),
+                       active ? chromeText() : chromeDim());
+            textLeft += 18;
         }
 
         // The close cross appears only where it can be used, and the label
@@ -684,9 +726,14 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
         drawLabel(gTitle, strip, chromeDim(), 12.5, YES);
     }
 
-    // No line under the strip: the chrome and the terminal are the same colour
-    // and meant to read as one surface. The sidebar does get one, because a
-    // column of tabs beside a column of text needs somewhere to end.
+    // A hairline under the strip, the full width of the window, so the title
+    // row reads as a title row and not as the first line of output.
+    [chromeEdge() setFill];
+    NSRectFillUsingOperation(NSMakeRect(0, gStripHeight - 1, b.size.width, 1),
+                             NSCompositingOperationSourceOver);
+
+    // The sidebar gets one too, because a column of tabs beside a column of
+    // text needs somewhere to end.
     if (tabBarVisible() && gTabPosition == 1) {
         NSRect grid = [gView frame];
         [chromeEdge() setFill];
@@ -1089,20 +1136,22 @@ void shellterSetTitle(const char *title) {
     });
 }
 
-void shellterSetTabs(const char *titles, int len, const char *busy, int count,
-                     int active, int position) {
+void shellterSetTabs(const char *titles, int len, const char *busy,
+                     const char *dirs, int count, int active, int position) {
     NSString *joined = (len > 0 && titles != NULL)
                            ? [[[NSString alloc] initWithBytes:titles
                                                        length:(NSUInteger)len
                                                      encoding:NSUTF8StringEncoding] autorelease]
                            : @"";
     NSString *busyStr = (busy != NULL) ? [NSString stringWithUTF8String:busy] : @"";
+    NSString *dirsStr = (dirs != NULL) ? [NSString stringWithUTF8String:dirs] : @"";
     NSArray *parts = (count > 0) ? [joined componentsSeparatedByString:@"\n"] : @[];
 
     // Copied out of the arguments before hopping threads: the Go side frees
     // them as soon as this returns.
     [parts retain];
     [busyStr retain];
+    [dirsStr retain];
 
     void (^apply)(void) = ^{
       BOOL wasVisible = tabBarVisible();
@@ -1112,6 +1161,8 @@ void shellterSetTabs(const char *titles, int len, const char *busy, int count,
       gTabTitles = parts;
       [gTabBusy release];
       gTabBusy = busyStr;
+      [gTabDirs release];
+      gTabDirs = dirsStr;
       gActiveTab = active;
       gTabPosition = position;
       if (gHoverTab >= tabCount()) {

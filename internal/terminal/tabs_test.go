@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"github.com/thakurankit7/shellter/internal/parser"
 	"testing"
 
 	"github.com/thakurankit7/shellter/internal/input"
@@ -166,19 +167,43 @@ func TestTabLabels(t *testing.T) {
 	cases := []struct {
 		title string
 		want  string
+		dir   bool
 	}{
-		{"", "zsh"},
-		{"   ", "zsh"},
-		{"ankitthakur@Ankits-MacBook-Pro:~/PERSONAL/Flux", "Flux"},
-		{"~/PERSONAL/Flux", "Flux"},
-		{"/usr/local/lib", "lib"},
-		{"vim", "vim"},
-		{"/", "/"},
+		{"", "zsh", false},
+		{"   ", "zsh", false},
+		{"ankitthakur@Ankits-MacBook-Pro:~/PERSONAL/Shellter", "Shellter", true},
+		{"~/PERSONAL/Shellter", "Shellter", true},
+		{"/usr/local/lib", "lib", true},
+		{"~", "~", true},
+		{"/", "/", true},
+		// Programs name themselves, and a prompt mark in front of that would
+		// lie - even when the name has a path inside it.
+		{"vim", "vim", false},
+		{"main.go (~/src) - VIM", "main.go (~/src) - VIM", false},
+		{"less", "less", false},
 	}
 	for _, c := range cases {
-		if got := label(c.title, "zsh"); got != c.want {
-			t.Fatalf("label(%q) = %q, want %q", c.title, got, c.want)
+		got, dir := label(c.title, "zsh")
+		if got != c.want || dir != c.dir {
+			t.Fatalf("label(%q) = %q, %v, want %q, %v", c.title, got, dir, c.want, c.dir)
 		}
+	}
+}
+
+// The bar draws a ">_" in front of a tab whose title is a directory, so
+// tabViews has to be the thing that knows which tabs those are.
+func TestTabViewsMarkDirectoriesAndNotPrograms(t *testing.T) {
+	g := newTestGUI(5, 20)
+	g.feed("\x1b]0;~/work/project\x07")
+	second := g.addTab(5, 20)
+	parser.New().Parse([]byte("\x1b]0;main.go (~/work) - VIM\x07"), second.focus.scr.Apply)
+
+	views := g.tabViews()
+	if !views[0].Directory {
+		t.Fatalf("%q should be a directory", views[0].Title)
+	}
+	if views[1].Directory {
+		t.Fatalf("%q is vim, not a directory", views[1].Title)
 	}
 }
 
