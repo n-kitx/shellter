@@ -4,6 +4,7 @@
 # Build output.
 /shellter
 /bin/
+/build/
 
 # Coverage and profiles.
 *.out

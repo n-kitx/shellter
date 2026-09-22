@@ -2,7 +2,8 @@
 //
 // Without arguments it runs inside the terminal it was launched from, writing
 // the shell's bytes straight back out. With -gui it opens a macOS window and
-// draws the terminal itself.
+// draws the terminal itself - which is also what it does when it was started
+// as Shellter.app, where there is no terminal to run inside.
 package main
 
 import (
@@ -37,7 +38,7 @@ func main() {
 // run returns the shell's exit status, or an error if Shellter itself could
 // not start.
 func run() (int, error) {
-	gui := flag.Bool("gui", false, "open a macOS window instead of running inside this terminal")
+	gui := flag.Bool("gui", bundled(), "open a macOS window instead of running inside this terminal")
 	path := flag.String("config", "", "settings file (default "+config.Path()+")")
 
 	// Every other flag is named after a setting in the file, and is validated
@@ -81,6 +82,23 @@ func run() (int, error) {
 	}
 
 	return runner()
+}
+
+// bundled reports whether we were started as Shellter.app rather than as a
+// binary on someone's PATH. It decides the default for -gui, because an app
+// launched from the Dock has no terminal to run inside: it has no stdin to
+// read and no stdout anyone would see, so it would sit there doing nothing
+// while the Dock bounced.
+//
+// The test is the bundle's own shape - "Shellter.app/Contents/MacOS/shellter"
+// - which is fixed by macOS and is the one thing that is true of every bundle
+// and of no ordinary build.
+func bundled() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(exe, ".app/Contents/MacOS/")
 }
 
 // settings layers the configuration file over the defaults, then the flags the

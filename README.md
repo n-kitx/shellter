@@ -1282,6 +1282,23 @@ go run ./cmd/shellter
 Either way, `exit` (or Ctrl+D) ends the session. In the window, closing it
 hangs up the shell; Cmd+Q quits.
 
+### As an application
+
+`go run` gives you a bare binary: the Dock draws a blank executable for it and
+the menu bar calls it whatever the file is called. An application is a bundle —
+a directory with a fixed shape, holding the binary, an icon, and the plist that
+ties the two together.
+
+```sh
+./scripts/bundle.sh            # -> build/Shellter.app
+open build/Shellter.app        # or drag it to /Applications
+```
+
+The artwork lives in `assets/Shellter.png`, one 1024-pixel picture; the script
+resizes it into the ten sizes macOS asks for and packs them with `iconutil`.
+The bundle is signed ad-hoc, which is enough to give it a stable identity on
+this machine — not enough to get it past Gatekeeper on anyone else's.
+
 ```sh
 go test ./...
 ```
