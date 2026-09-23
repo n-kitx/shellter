@@ -41,11 +41,15 @@ func BenchmarkPumpChunk(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		g := newTestGUI(24, 80)
-		p := parser.New()
-		g.mu.Lock()
-		p.Parse(data, g.screen().Apply)
-		_ = g.screen().TakeReplies()
-		g.mu.Unlock()
+		// The lock a real pump takes is the pane's, not the GUI's, and it is
+		// taken around the parse rather than around finding the pane: asking
+		// the GUI which pane is focused locks the GUI itself.
+		pane := g.current()
+		ps := parser.New()
+		pane.mu.Lock()
+		ps.Parse(data, pane.scr.Apply)
+		_ = pane.scr.TakeReplies()
+		pane.mu.Unlock()
 	}
 }
 
