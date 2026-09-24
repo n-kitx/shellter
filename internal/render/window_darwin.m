@@ -34,6 +34,7 @@ static int gActiveTab = 0;
 static int gTabPosition = 0; // 0 top, 1 left
 static int gHoverTab = -1;   // the tab under the pointer, or -1
 static BOOL gHoverNew = NO;  // the pointer is over the "+"
+static BOOL gHoverClose = NO; // the pointer is over gHoverTab's close cross
 static NSString *gTitle = @"Shellter";
 
 // Chrome settings, pushed in from the configuration file at startup.
@@ -42,10 +43,14 @@ static double gOpacity = 1.0; // how solid the window is
 static unsigned int gChromeRGB = 0x1b1d22; // the terminal's own background
 static double gLeadInset = 78;   // room the traffic lights need, measured at setup
 static double gStripHeight = 30; // the title/tab row, which is the titlebar
+static double gTabBarWidth = 190; // the sidebar; the user can drag its edge
 
 // The look of the chrome, in one place so a theme has somewhere to land later.
 enum {
-    kTabBarWidth = 190,  // the sidebar, when the tabs are on the left
+    kTabBarMinWidth = 120, // the sidebar, when the tabs are on the left,
+    kTabBarMaxWidth = 480, // is as wide as the user dragged it, within these
+    kTabBarGrip = 5,       // the strip along its right edge that drags it
+    kGridMinWidth = 200,   // what a dragged sidebar always leaves the terminal
     kTabHeightLeft = 32, // one row of the sidebar
     kTabMinWidth = 110,  // a top tab never gets narrower than this
     kTabMaxWidth = 240,
@@ -103,6 +108,9 @@ static NSColor *shade(unsigned int base, double amount, double alpha) {
 static NSColor *chromeBG(void) { return shade(gChromeRGB, 0, gOpacity); }
 static NSColor *chromeActiveBG(void) { return shade(gChromeRGB, 0.16, 1.0); }
 static NSColor *chromeHoverBG(void) { return shade(gChromeRGB, 0.08, 1.0); }
+// A button under the pointer has to show up against an active pill as well as
+// against the bare strip, so it is lighter than either.
+static NSColor *chromeButtonHoverBG(void) { return shade(gChromeRGB, 0.26, 1.0); }
 static NSColor *chromeText(void) { return shade(gChromeRGB, 0.92, 1.0); }
 static NSColor *chromeDim(void) { return shade(gChromeRGB, 0.55, 1.0); }
 static NSColor *chromeAccent(void) { return rgb(0x4c, 0x8e, 0xda); }
@@ -562,6 +570,31 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
     [text drawInRect:line withAttributes:attrs];
 }
 
+// titlebarDoubleClicked does what a double click on a titlebar does anywhere
+// else on this Mac. The real titlebar is hidden under our strip, so it never
+// sees the click and we have to answer it ourselves - and the answer is the
+// user's, from System Settings > Desktop & Dock, not ours to pick.
+static void titlebarDoubleClicked(NSWindow *window) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSString *action = [d stringForKey:@"AppleActionOnDoubleClick"];
+    if (action == nil) {
+        // The setting before macOS 11 was a yes/no for minimising.
+        action = [d boolForKey:@"AppleMiniaturizeOnDoubleClick"] ? @"Minimize" : @"Maximize";
+    }
+    if ([action isEqualToString:@"Minimize"]) {
+        [window performMiniaturize:nil];
+    } else if ([action isEqualToString:@"Maximize"] || [action isEqualToString:@"Fill"]) {
+        [window performZoom:nil];
+    }
+    // "None" does nothing, which is what it says.
+}
+
+// Declared ahead of the bar, which lays the window out again when its edge is
+// dragged.
+@interface ShellterContent : NSView
+- (void)layoutViews;
+@end
+
 @interface ShellterTabBar : NSView
 @end
 
@@ -610,15 +643,21 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
                                   NSMaxX(r) - textLeft - (closable ? 26 : 11), r.size.height);
         drawLabel(gTabTitles[i], label, active ? chromeText() : chromeDim(), 12, NO);
         if (closable) {
-            drawCross(closeRect(r), active ? chromeText() : chromeDim());
+            NSRect cross = closeRect(r);
+            BOOL hot = (i == gHoverTab && gHoverClose);
+            if (hot) {
+                [chromeButtonHoverBG() setFill];
+                [[NSBezierPath bezierPathWithRoundedRect:cross xRadius:4 yRadius:4] fill];
+            }
+            drawCross(cross, (active || hot) ? chromeText() : chromeDim());
         }
     }
 
     NSRect plus = newTabRect(bounds.size);
     if (gHoverNew) {
-        fillPill(plus, chromeHoverBG());
+        fillPill(plus, chromeButtonHoverBG());
     }
-    drawPlus(plus, chromeDim());
+    drawPlus(plus, gHoverNew ? chromeText() : chromeDim());
 }
 
 // hitTab returns the tab under p, or -1, and says whether the close cross was
@@ -638,8 +677,49 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
     return -1;
 }
 
+// gripRect is the sidebar's right edge, which drags to make it wider or
+// narrower. Along the top there is nothing to drag.
+- (NSRect)gripRect {
+    if (gTabPosition != 1) {
+        return NSZeroRect;
+    }
+    NSRect b = [self bounds];
+    return NSMakeRect(NSMaxX(b) - kTabBarGrip, 0, kTabBarGrip, b.size.height);
+}
+
+- (void)resetCursorRects {
+    [self addCursorRect:[self gripRect] cursor:[NSCursor resizeLeftRightCursor]];
+}
+
+// dragEdge follows the pointer until the button comes up, laying the window out
+// again at every step so the terminal reflows under the drag rather than after
+// it - the same as resizing the window does.
+- (void)dragEdge:(NSEvent *)event {
+    ShellterContent *content = (ShellterContent *)[self superview];
+    double start = [event locationInWindow].x;
+    double from = gTabBarWidth;
+    for (;;) {
+        NSEvent *e = [[self window]
+            nextEventMatchingMask:(NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp)];
+        if ([e type] == NSEventTypeLeftMouseUp) {
+            break;
+        }
+        double w = from + [e locationInWindow].x - start;
+        double most = MIN(kTabBarMaxWidth, NSWidth([content bounds]) - kGridMinWidth);
+        w = MAX(kTabBarMinWidth, MIN(w, most));
+        if (w != gTabBarWidth) {
+            gTabBarWidth = w;
+            [content layoutViews];
+        }
+    }
+}
+
 - (void)mouseDown:(NSEvent *)event {
     NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
+    if (NSPointInRect(p, [self gripRect])) {
+        [self dragEdge:event];
+        return;
+    }
     if (NSPointInRect(p, newTabRect([self bounds].size))) {
         shellterGoNewTab();
         return;
@@ -647,6 +727,11 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
     BOOL closed = NO;
     int i = [self hitTab:p closed:&closed];
     if (i < 0) {
+        // Along the top the bar is the titlebar, gaps and all; down the side
+        // it is only a list.
+        if (gTabPosition == 0 && [event clickCount] == 2) {
+            titlebarDoubleClicked([self window]);
+        }
         return;
     }
     if (closed) {
@@ -661,17 +746,20 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
     BOOL closed = NO;
     int wasTab = gHoverTab;
     BOOL wasNew = gHoverNew;
+    BOOL wasClose = gHoverClose;
     gHoverTab = [self hitTab:p closed:&closed];
+    gHoverClose = closed;
     gHoverNew = NSPointInRect(p, newTabRect([self bounds].size));
-    if (wasTab != gHoverTab || wasNew != gHoverNew) {
+    if (wasTab != gHoverTab || wasNew != gHoverNew || wasClose != gHoverClose) {
         [self setNeedsDisplay:YES];
     }
 }
 
 - (void)mouseExited:(NSEvent *)event {
-    if (gHoverTab != -1 || gHoverNew) {
+    if (gHoverTab != -1 || gHoverNew || gHoverClose) {
         gHoverTab = -1;
         gHoverNew = NO;
+        gHoverClose = NO;
         [self setNeedsDisplay:YES];
     }
 }
@@ -701,9 +789,6 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
-
-@interface ShellterContent : NSView
-@end
 
 @implementation ShellterContent
 
@@ -742,9 +827,21 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
     }
 }
 
-// Empty chrome drags the window, the way a titlebar does.
+// Empty chrome drags the window, the way a titlebar does, and the strip answers
+// a double click the way one does too. The drag is asked for explicitly rather
+// than left to mouseDownCanMoveWindow, because a view that lets the window
+// server move the window is not reliably told about the click at all.
+- (void)mouseDown:(NSEvent *)event {
+    NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
+    if (p.y < gStripHeight && [event clickCount] == 2) {
+        titlebarDoubleClicked([self window]);
+        return;
+    }
+    [[self window] performWindowDragWithEvent:event];
+}
+
 - (BOOL)mouseDownCanMoveWindow {
-    return YES;
+    return NO;
 }
 
 // layoutViews gives the chrome its edges and the terminal everything else. It
@@ -770,9 +867,9 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
         [gView setFrame:NSMakeRect(0, top, b.size.width, b.size.height - top)];
     } else if (gTabPosition == 1) {
         [gTabBar setHidden:NO];
-        [gTabBar setFrame:NSMakeRect(0, top, kTabBarWidth, b.size.height - top)];
-        [gView setFrame:NSMakeRect(kTabBarWidth, top,
-                                   b.size.width - kTabBarWidth, b.size.height - top)];
+        [gTabBar setFrame:NSMakeRect(0, top, gTabBarWidth, b.size.height - top)];
+        [gView setFrame:NSMakeRect(gTabBarWidth, top,
+                                   b.size.width - gTabBarWidth, b.size.height - top)];
     } else {
         [gTabBar setHidden:NO];
         // The bar starts where the traffic lights end, so it never has to
@@ -1029,7 +1126,7 @@ void shellterRun(const char *title, int rows, int cols, double fontSize, double 
         NSRect frame = NSMakeRect(0, 0, cols * gCharWidth + 2 * gPad,
                                   rows * gLineHeight + 2 * gPad + gStripHeight);
         if (tabBarVisible() && gTabPosition == 1) {
-            frame.size.width += kTabBarWidth;
+            frame.size.width += gTabBarWidth;
         }
         NSWindow *window = [[NSWindow alloc]
             initWithContentRect:frame
@@ -1167,6 +1264,7 @@ void shellterSetTabs(const char *titles, int len, const char *busy,
       gTabPosition = position;
       if (gHoverTab >= tabCount()) {
           gHoverTab = -1;
+          gHoverClose = NO;
       }
 
       syncTabPositionMenu();

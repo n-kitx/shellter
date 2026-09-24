@@ -749,6 +749,8 @@ see, so that switching to one never shows a grid of the wrong shape.
 | `Cmd+A` | select everything this pane holds, history included |
 | drag | select; double click for a word, triple for a line |
 | `Shift`+drag | select even while a program has asked for the mouse |
+| drag the sidebar's edge | make the tab sidebar wider or narrower (120–480 pt) |
+| double click the title strip | zoom or minimise, as System Settings says |
 
 All but `Cmd+1`…`Cmd+9` are menu items, because a shortcut nobody can find is
 not a feature. `Cmd+1`…`Cmd+9` are handled in `GUI.tabKey`, ahead of the encoder —
