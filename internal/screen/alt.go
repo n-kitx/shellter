@@ -91,33 +91,29 @@ func (s *Screen) current() *buffer {
 // to decide what the scroll wheel should do.
 func (s *Screen) AltScreen() bool { return s.altActive }
 
-// resizeInactive keeps the off-screen buffer the same size as the screen, so
-// that leaving the alternate screen after a resize does not restore a grid of
-// the wrong shape.
-//
-// The primary buffer's content is kept top-left, exactly as the visible grid's
-// is: reflowing wrapped lines needs to know which line breaks were soft, which
-// this terminal does not yet record.
-func (s *Screen) resizeInactive(rows, cols int) {
+// reflowInactive reflows the primary screen while it waits behind the
+// alternate one, so that leaving vim after a resize shows the shell's text
+// rewrapped to the new width rather than cut at the old one.
+func (s *Screen) reflowInactive(rows, cols int) {
 	b := s.inactive
 	if b == nil {
 		return
 	}
-	next := make([]Cell, rows*cols)
-	for i := range next {
-		next[i] = Blank
-	}
-	oldRows := len(b.cells) / s.cols
-	for row := 0; row < min(rows, oldRows); row++ {
-		p := b.rowIndex[row] * s.cols
-		copy(next[row*cols:(row+1)*cols], b.cells[p:p+min(cols, s.cols)])
-	}
-	b.cells = next
-	b.rowIndex = identityRows(rows)
-	b.wrapped = make([]bool, rows) // see Resize: they described the old width
+	oldCols := s.cols
+	cells, wrapped, cur := s.reflowPrimary(gridRows{
+		rows: len(b.cells) / oldCols,
+		cols: oldCols,
+		row: func(r int) []Cell {
+			p := b.rowIndex[r] * oldCols
+			return b.cells[p : p+oldCols]
+		},
+		wrapped: func(r int) bool { return b.wrapped[b.rowIndex[r]] },
+	}, b.cur, b.pendingWrap, rows, cols)
 
-	b.cur.Row = clamp(b.cur.Row, 0, rows-1)
-	b.cur.Col = clamp(b.cur.Col, 0, cols-1)
+	b.cells, b.wrapped, b.cur = cells, wrapped, cur
+	b.rowIndex = identityRows(rows)
+	b.saved.cur.Row = clamp(b.saved.cur.Row, 0, rows-1)
+	b.saved.cur.Col = clamp(b.saved.cur.Col, 0, cols-1)
 	b.top, b.bottom = 0, rows-1
 	b.pendingWrap = false
 }

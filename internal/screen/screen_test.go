@@ -288,8 +288,10 @@ func TestStateSurvivesSplitWrites(t *testing.T) {
 	assertLine(t, split, 1, "    cd")
 }
 
-func TestResizeKeepsContentAndClampsCursor(t *testing.T) {
-	s := New(4, 10)
+// Shrinking rewraps the lines rather than cutting them, and keeps the cursor
+// in view: rows that no longer fit go into history, not away.
+func TestResizeReflowsAndKeepsTheCursorInView(t *testing.T) {
+	s := NewWithScrollback(4, 10, 20)
 	feed(s, "hello\r\nworld")
 	assertCursor(t, s, 1, 5)
 
@@ -298,9 +300,13 @@ func TestResizeKeepsContentAndClampsCursor(t *testing.T) {
 	if rows != 2 || cols != 4 {
 		t.Fatalf("size = %dx%d, want 2x4", rows, cols)
 	}
-	assertLine(t, s, 0, "hell")
-	assertLine(t, s, 1, "worl")
-	assertCursor(t, s, 1, 3)
+	// hello -> "hell" "o", world -> "worl" "d": four rows, the last two shown.
+	assertLine(t, s, 0, "worl")
+	assertLine(t, s, 1, "d")
+	assertCursor(t, s, 1, 1)
+	if got := s.ScrollbackLen(); got != 2 {
+		t.Fatalf("history has %d lines, want the 2 rows pushed off the top", got)
+	}
 }
 
 func TestStringDropsTrailingBlankLines(t *testing.T) {

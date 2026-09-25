@@ -190,10 +190,10 @@ func TestResizeWhileOnAlternateScreen(t *testing.T) {
 	if rows, cols := s.Size(); rows != 6 || cols != 20 {
 		t.Fatalf("size = %dx%d, want 6x20", rows, cols)
 	}
-	// The line was written into a 10-column screen, so it wrapped there; what
-	// matters is that the restored buffer is the new shape and kept its text.
-	if got := s.Line(0); got != "primary te" {
-		t.Fatalf("row 0 = %q, want the primary text at the new size", got)
+	// The line was written into a 10-column screen, so it wrapped there. The
+	// shell's screen was reflowed behind vim, so at 20 columns it is one row.
+	if got := s.Line(0); got != "primary text" {
+		t.Fatalf("row 0 = %q, want the primary text rewrapped to the new width", got)
 	}
 	if got := len(s.Snapshot().Cells); got != 6*20 {
 		t.Fatalf("snapshot has %d cells, want %d", got, 6*20)

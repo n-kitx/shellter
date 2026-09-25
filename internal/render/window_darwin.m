@@ -38,6 +38,7 @@ static int gHoverTab = -1;   // the tab under the pointer, or -1
 static BOOL gHoverNew = NO;  // the pointer is over the "+"
 static BOOL gHoverClose = NO; // the pointer is over gHoverTab's close cross
 static NSString *gTitle = @"Shellter";
+static BOOL gCanSplit = YES; // the focused tab has room for another pane
 
 // Chrome settings, pushed in from the configuration file at startup.
 static double gPad = 12;      // points between the window edge and the text
@@ -120,9 +121,8 @@ static NSColor *chromeDim(void) { return shade(gChromeRGB, 0.55, 1.0); }
 static NSColor *chromeAccent(void) { return rgb(0x4c, 0x8e, 0xda); }
 static NSColor *chromeEdge(void) { return shade(gChromeRGB, 0.18, 1.0); }
 
-// The line between two panes, and the wash over the ones without the focus.
+// The line between two panes.
 static NSColor *dividerColor(void) { return rgba(0x7a, 0x82, 0x94, 0.55); }
-static NSColor *dimColor(void) { return rgba(0x00, 0x00, 0x00, 0.28); }
 
 // Cursor shapes, matching render.CursorStyle.
 enum {
@@ -221,6 +221,16 @@ static NSEvent *gKeyEvent = nil;
 static int gCursorRow = 0, gCursorCol = 0;
 static unsigned int gCursorFG = 0xffffff, gCursorBG = 0;
 
+// The dividers between split panes, as the last frame drew them. They are
+// Go's to place, and the only way this side learns where they are is by being
+// asked to draw them; keeping the rectangles lets the pointer turn into a
+// resize cursor over them, which is what says they can be dragged.
+enum { kMaxDividers = 64 };
+static NSRect gDividers[kMaxDividers];
+static int gDividerCount = 0;
+static NSRect gCursorDividers[kMaxDividers]; // what the cursor rects were built from
+static int gCursorDividerCount = 0;
+
 @interface ShellterView : NSView <NSTextInputClient>
 @end
 
@@ -253,8 +263,27 @@ static unsigned int gCursorFG = 0xffffff, gCursorBG = 0;
     // Go drives the painting: it calls shellterClear, then one fill and one
     // text call per span, then the cursor. Keeping the loop on the Go side
     // means the grid never has to be copied across the boundary.
+    gDividerCount = 0;
     shellterGoRender();
     [self drawMarkedText];
+
+    // Cursor rects are rebuilt only when a divider actually moved: most frames
+    // are text arriving, and change nothing about where the panes are.
+    if (gDividerCount != gCursorDividerCount ||
+        memcmp(gDividers, gCursorDividers, sizeof(NSRect) * gDividerCount) != 0) {
+        memcpy(gCursorDividers, gDividers, sizeof(NSRect) * gDividerCount);
+        gCursorDividerCount = gDividerCount;
+        [[self window] invalidateCursorRectsForView:self];
+    }
+}
+
+- (void)resetCursorRects {
+    for (int i = 0; i < gCursorDividerCount; i++) {
+        NSRect r = gCursorDividers[i];
+        NSCursor *c = r.size.height > r.size.width ? [NSCursor resizeLeftRightCursor]
+                                                   : [NSCursor resizeUpDownCursor];
+        [self addCursorRect:r cursor:c];
+    }
 }
 
 // drawMarkedText paints a composition in progress over the cells at the
@@ -549,6 +578,16 @@ void shellterSetClipboard(const char *text, int len) {
     [pb writeObjects:@[s]];
 }
 
+void shellterBeep(void) {
+    NSBeep();
+}
+
+void shellterSetCanSplit(int can) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      gCanSplit = can != 0;
+    });
+}
+
 int shellterConfirm(const char *message, const char *detail, const char *action) {
     NSAlert *alert = [[[NSAlert alloc] init] autorelease];
     [alert setMessageText:[NSString stringWithUTF8String:message]];
@@ -557,6 +596,27 @@ int shellterConfirm(const char *message, const char *detail, const char *action)
     [alert addButtonWithTitle:@"Cancel"];
     [alert setAlertStyle:NSAlertStyleWarning];
     return [alert runModal] == NSAlertFirstButtonReturn;
+}
+
+char *shellterPrompt(const char *message, const char *detail, const char *initial) {
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    [alert setMessageText:[NSString stringWithUTF8String:message]];
+    [alert setInformativeText:[NSString stringWithUTF8String:detail]];
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Cancel"];
+    NSTextField *field =
+        [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 260, 24)] autorelease];
+    [field setStringValue:[NSString stringWithUTF8String:initial]];
+    [alert setAccessoryView:field];
+    // The field, not the OK button, has the keyboard, with its text selected:
+    // typing replaces the name and Return accepts it.
+    [[alert window] setInitialFirstResponder:field];
+    [field selectText:nil];
+    if ([alert runModal] != NSAlertFirstButtonReturn) {
+        return NULL;
+    }
+    const char *utf8 = [[field stringValue] UTF8String];
+    return strdup(utf8 != NULL ? utf8 : "");
 }
 
 // shellterClipboard returns a copy the caller must free, or NULL when there is
@@ -758,6 +818,40 @@ static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, B
     [text drawInRect:line withAttributes:attrs];
 }
 
+// ---------------------------------------------------------------------------
+// Dragging a tab
+// ---------------------------------------------------------------------------
+//
+// The dragged tab is drawn under the pointer, lifted above the others, and the
+// ones it passes slide out of its way. Only positions are animated, and only
+// while something is actually moving: a timer runs while any tab is off its
+// place and stops the moment they have all arrived.
+
+enum { kMaxTabs = 256 };
+static double gTabShift[kMaxTabs]; // how far each tab is drawn from its place
+static int gDragTab = -1;          // the tab under the pointer, or -1
+static double gDragAt = 0;         // where its leading edge is, along the bar
+static NSTimer *gTabAnim = nil;
+
+// Everything about a drag happens along one axis: across a bar on top, down
+// a bar on the left.
+static double along(NSPoint p) { return gTabPosition == 1 ? p.y : p.x; }
+static double leading(NSRect r) { return gTabPosition == 1 ? r.origin.y : r.origin.x; }
+static double extent(NSRect r) { return gTabPosition == 1 ? r.size.height : r.size.width; }
+
+static NSRect shiftedAlong(NSRect r, double by) {
+    if (gTabPosition == 1) {
+        r.origin.y += by;
+    } else {
+        r.origin.x += by;
+    }
+    return r;
+}
+
+static NSRect placedAt(NSRect r, double at) {
+    return shiftedAlong(r, at - leading(r));
+}
+
 // titlebarDoubleClicked does what a double click on a titlebar does anywhere
 // else on this Mac. The real titlebar is hidden under our strip, so it never
 // sees the click and we have to answer it ourselves - and the answer is the
@@ -798,47 +892,17 @@ static void titlebarDoubleClicked(NSWindow *window) {
     // pill can be transparent where it is not filled.
     NSRect bounds = [self bounds];
 
+    // Every tab at its place, give or take the slide it is part way through;
+    // the dragged one last, so it passes over the others rather than under.
     for (int i = 0; i < tabCount(); i++) {
-        NSRect r = tabRect(i, bounds.size);
-        BOOL active = (i == gActiveTab);
-
-        if (active) {
-            fillPill(r, chromeActiveBG());
-        } else if (i == gHoverTab) {
-            fillPill(r, chromeHoverBG());
+        if (i == gDragTab) {
+            continue;
         }
-
-        // A dot for a tab that is still running something, then a prompt mark
-        // if the title is a directory. Both sit ahead of the label, so the
-        // label starts wherever they left off.
-        double textLeft = r.origin.x + 11;
-        if (tabIsBusy(i)) {
-            NSRect dot = NSMakeRect(textLeft, NSMidY(r) - 3, 6, 6);
-            [chromeAccent() setFill];
-            [[NSBezierPath bezierPathWithOvalInRect:dot] fill];
-            textLeft += 12;
-        }
-        if (tabIsDir(i)) {
-            drawPrompt(NSMakeRect(textLeft, r.origin.y, 13, r.size.height),
-                       active ? chromeText() : chromeDim());
-            textLeft += 18;
-        }
-
-        // The close cross appears only where it can be used, and the label
-        // gives up its space only then, so titles do not jump on hover.
-        BOOL closable = active || i == gHoverTab;
-        NSRect label = NSMakeRect(textLeft, r.origin.y,
-                                  NSMaxX(r) - textLeft - (closable ? 26 : 11), r.size.height);
-        drawLabel(gTabTitles[i], label, active ? chromeText() : chromeDim(), 12, NO);
-        if (closable) {
-            NSRect cross = closeRect(r);
-            BOOL hot = (i == gHoverTab && gHoverClose);
-            if (hot) {
-                [chromeButtonHoverBG() setFill];
-                [[NSBezierPath bezierPathWithRoundedRect:cross xRadius:4 yRadius:4] fill];
-            }
-            drawCross(cross, (active || hot) ? chromeText() : chromeDim());
-        }
+        double shift = i < kMaxTabs ? gTabShift[i] : 0;
+        [self drawTab:i in:shiftedAlong(tabRect(i, bounds.size), shift) lifted:NO];
+    }
+    if (gDragTab >= 0 && gDragTab < tabCount()) {
+        [self drawTab:gDragTab in:placedAt(tabRect(gDragTab, bounds.size), gDragAt) lifted:YES];
     }
 
     NSRect plus = newTabRect(bounds.size);
@@ -846,6 +910,98 @@ static void titlebarDoubleClicked(NSWindow *window) {
         fillPill(plus, chromeButtonHoverBG());
     }
     drawPlus(plus, gHoverNew ? chromeText() : chromeDim());
+}
+
+// drawTab draws one tab in r. A lifted tab is the one being dragged: it gets
+// the active fill and a soft shadow, the usual Mac way of saying "picked up".
+- (void)drawTab:(int)i in:(NSRect)r lifted:(BOOL)lifted {
+    BOOL active = (i == gActiveTab) || lifted;
+
+    if (lifted) {
+        [NSGraphicsContext saveGraphicsState];
+        NSShadow *shadow = [[[NSShadow alloc] init] autorelease];
+        [shadow setShadowColor:rgba(0, 0, 0, 0.45)];
+        [shadow setShadowBlurRadius:8];
+        [shadow setShadowOffset:NSMakeSize(0, -2)];
+        [shadow set];
+        fillPill(r, chromeActiveBG());
+        [NSGraphicsContext restoreGraphicsState];
+    } else if (active) {
+        fillPill(r, chromeActiveBG());
+    } else if (i == gHoverTab) {
+        fillPill(r, chromeHoverBG());
+    }
+
+    // A dot for a tab that is still running something, then a prompt mark
+    // if the title is a directory. Both sit ahead of the label, so the
+    // label starts wherever they left off.
+    double textLeft = r.origin.x + 11;
+    if (tabIsBusy(i)) {
+        NSRect dot = NSMakeRect(textLeft, NSMidY(r) - 3, 6, 6);
+        [chromeAccent() setFill];
+        [[NSBezierPath bezierPathWithOvalInRect:dot] fill];
+        textLeft += 12;
+    }
+    if (tabIsDir(i)) {
+        drawPrompt(NSMakeRect(textLeft, r.origin.y, 13, r.size.height),
+                   active ? chromeText() : chromeDim());
+        textLeft += 18;
+    }
+
+    // The close cross appears only where it can be used, and the label
+    // gives up its space only then, so titles do not jump on hover. A tab in
+    // flight has no cross: it cannot be clicked while it is being carried.
+    BOOL closable = !lifted && (active || i == gHoverTab);
+    NSRect label = NSMakeRect(textLeft, r.origin.y,
+                              NSMaxX(r) - textLeft - (closable ? 26 : 11), r.size.height);
+    drawLabel(gTabTitles[i], label, active ? chromeText() : chromeDim(), 12, NO);
+    if (closable) {
+        NSRect cross = closeRect(r);
+        BOOL hot = (i == gHoverTab && gHoverClose);
+        if (hot) {
+            [chromeButtonHoverBG() setFill];
+            [[NSBezierPath bezierPathWithRoundedRect:cross xRadius:4 yRadius:4] fill];
+        }
+        drawCross(cross, (active || hot) ? chromeText() : chromeDim());
+    }
+}
+
+// animate starts the slide timer if it is not already running. The timer is
+// in the common modes so that it keeps firing while dragTab: is tracking the
+// mouse, which runs the loop in its own mode.
+- (void)animate {
+    if (gTabAnim != nil) {
+        return;
+    }
+    gTabAnim = [NSTimer timerWithTimeInterval:1.0 / 60.0
+                                       target:self
+                                     selector:@selector(step:)
+                                     userInfo:nil
+                                      repeats:YES];
+    [[NSRunLoop currentRunLoop] addTimer:gTabAnim forMode:NSRunLoopCommonModes];
+}
+
+// step moves every tab part of the way home. Each frame closes the same
+// fraction of what is left, which starts fast and settles gently - about a
+// fifth of a second from a full slot away - and needs no clock to be kept.
+- (void)step:(NSTimer *)timer {
+    BOOL moving = NO;
+    for (int i = 0; i < kMaxTabs; i++) {
+        if (gTabShift[i] == 0) {
+            continue;
+        }
+        gTabShift[i] *= 0.62;
+        if (fabs(gTabShift[i]) < 0.5) {
+            gTabShift[i] = 0;
+        } else {
+            moving = YES;
+        }
+    }
+    [self setNeedsDisplay:YES];
+    if (!moving) {
+        [gTabAnim invalidate];
+        gTabAnim = nil;
+    }
 }
 
 // hitTab returns the tab under p, or -1, and says whether the close cross was
@@ -924,9 +1080,93 @@ static void titlebarDoubleClicked(NSWindow *window) {
     }
     if (closed) {
         shellterGoTabClose(i);
-    } else {
-        shellterGoTabSelect(i);
+        return;
     }
+    shellterGoTabSelect(i);
+    if ([event clickCount] == 2) {
+        shellterGoTabRename(i);
+        return;
+    }
+    [self dragTab:i from:event];
+}
+
+// dragTab carries a tab along the bar until the button comes up.
+//
+// The tab stays under the pointer at the spot it was picked up by, held
+// within the bar. When its middle crosses into another tab's place, Go is told
+// to reorder - and pushes the new order straight back, since this is the main
+// thread - and the tabs that were jumped over start a slide from where they
+// were to where they now belong. On release the dragged tab slides the last
+// little way into its own place. A press that never moves more than a few
+// points was a click, and has already selected the tab.
+- (void)dragTab:(int)index from:(NSEvent *)down {
+    NSSize size = [self bounds].size;
+    NSPoint start = [self convertPoint:[down locationInWindow] fromView:nil];
+    double grab = along(start) - leading(tabRect(index, size));
+    BOOL dragging = NO;
+
+    for (;;) {
+        NSEvent *e = [[self window]
+            nextEventMatchingMask:(NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp)];
+        if ([e type] == NSEventTypeLeftMouseUp) {
+            break;
+        }
+        NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+        if (!dragging) {
+            if (hypot(p.x - start.x, p.y - start.y) < 4) {
+                continue;
+            }
+            dragging = YES;
+            gHoverTab = -1;
+            gHoverNew = NO;
+        }
+
+        int n = tabCount();
+        if (index >= n) {
+            break; // a tab closed under the drag; let go
+        }
+        double first = leading(tabRect(0, size));
+        double last = leading(tabRect(n - 1, size));
+        double step = n > 1 ? leading(tabRect(1, size)) - first : 1;
+        gDragAt = MAX(first, MIN(along(p) - grab, last));
+        gDragTab = index;
+
+        int to = (int)floor((gDragAt - first) / step + 0.5);
+        to = MAX(0, MIN(to, n - 1));
+        if (to != index && n <= kMaxTabs) {
+            [self jumpFrom:index to:to step:step];
+            shellterGoTabMove(index, to);
+            index = to;
+            gDragTab = to;
+            [self animate];
+        }
+        [self setNeedsDisplay:YES];
+    }
+
+    if (dragging) {
+        if (index < tabCount() && index < kMaxTabs) {
+            gTabShift[index] = gDragAt - leading(tabRect(index, size));
+        }
+        gDragTab = -1;
+        [self animate];
+    }
+}
+
+// jumpFrom:to: moves the slide offsets along with the tabs they belong to, and
+// gives each tab that was jumped over a slide of one place - it starts where
+// it was drawn a moment ago and eases into its new place.
+- (void)jumpFrom:(int)from to:(int)to step:(double)step {
+    double moved = gTabShift[from];
+    if (from < to) {
+        for (int j = from; j < to; j++) {
+            gTabShift[j] = gTabShift[j + 1] + step;
+        }
+    } else {
+        for (int j = from; j > to; j--) {
+            gTabShift[j] = gTabShift[j - 1] - step;
+        }
+    }
+    gTabShift[to] = moved;
 }
 
 - (void)mouseMoved:(NSEvent *)event {
@@ -1191,12 +1431,46 @@ static void zoomText(double size) {
     shellterGoFocusPane(3);
 }
 
+- (void)renameTab:(id)sender {
+    shellterGoTabRename(gActiveTab);
+}
+
+- (void)swapLeft:(id)sender {
+    shellterGoSwapPane(0);
+}
+
+- (void)swapRight:(id)sender {
+    shellterGoSwapPane(1);
+}
+
+- (void)swapUp:(id)sender {
+    shellterGoSwapPane(2);
+}
+
+- (void)swapDown:(id)sender {
+    shellterGoSwapPane(3);
+}
+
+- (void)paneToTab:(id)sender {
+    shellterGoPaneToTab();
+}
+
 - (void)tabsOnTop:(id)sender {
     shellterGoTabPosition(0);
 }
 
 - (void)tabsOnLeft:(id)sender {
     shellterGoTabPosition(1);
+}
+
+// Split Right and Split Down are greyed out once the tab is full. Everything
+// else the delegate answers for is always available.
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+    SEL action = [item action];
+    if (action == @selector(splitBeside:) || action == @selector(splitAbove:)) {
+        return gCanSplit;
+    }
+    return YES;
 }
 
 - (void)clearBuffer:(id)sender {
@@ -1324,6 +1598,8 @@ static void installMenu(id target) {
          NSEventModifierFlagCommand | NSEventModifierFlagShift, target);
     item(shellMenu, @"Previous Tab", @selector(previousTab:), @"[",
          NSEventModifierFlagCommand | NSEventModifierFlagShift, target);
+    [shellMenu addItem:[NSMenuItem separatorItem]];
+    item(shellMenu, @"Rename Tab\u2026", @selector(renameTab:), @"", 0, target);
     [shellItem setSubmenu:shellMenu];
 
     // Splits get their own menu: there are six commands, and buried in View
@@ -1343,6 +1619,15 @@ static void installMenu(id target) {
     item(splitMenu, @"Focus Right", @selector(focusRight:), @"\uF703", focusMods, target);
     item(splitMenu, @"Focus Up", @selector(focusUp:), @"\uF700", focusMods, target);
     item(splitMenu, @"Focus Down", @selector(focusDown:), @"\uF701", focusMods, target);
+    [splitMenu addItem:[NSMenuItem separatorItem]];
+    // The same arrows with Shift added carry the pane itself rather than the
+    // focus.
+    NSEventModifierFlags swapMods = focusMods | NSEventModifierFlagShift;
+    item(splitMenu, @"Swap Pane Left", @selector(swapLeft:), @"\uF702", swapMods, target);
+    item(splitMenu, @"Swap Pane Right", @selector(swapRight:), @"\uF703", swapMods, target);
+    item(splitMenu, @"Swap Pane Up", @selector(swapUp:), @"\uF700", swapMods, target);
+    item(splitMenu, @"Swap Pane Down", @selector(swapDown:), @"\uF701", swapMods, target);
+    item(splitMenu, @"Move Pane to New Tab", @selector(paneToTab:), @"", 0, target);
     [splitMenu addItem:[NSMenuItem separatorItem]];
     item(splitMenu, @"Close Pane", @selector(closePane:), @"w",
          NSEventModifierFlagCommand, target);
@@ -1550,6 +1835,12 @@ void shellterSetTabs(const char *titles, int len, const char *busy,
     void (^apply)(void) = ^{
       BOOL wasVisible = tabBarVisible();
       int wasPosition = gTabPosition;
+      // A tab opening or closing renumbers them all, so slides in flight no
+      // longer belong to the tabs they were started for.
+      if ((int)[parts count] != tabCount()) {
+          memset(gTabShift, 0, sizeof gTabShift);
+          gDragTab = -1;
+      }
 
       [gTabTitles release];
       gTabTitles = parts;
@@ -1665,24 +1956,39 @@ void shellterEndPane(void) {
 
 void shellterDrawDivider(int row, int col, int rows, int cols) {
     NSRect gap = cellRect(row, col, rows, cols);
+    if (gDividerCount < kMaxDividers) {
+        gDividers[gDividerCount++] = gap;
+    }
     // A hairline down the middle of the gap rather than a filled cell: the
     // whole cell would be a thick bar, and the point of the line is to separate
     // the two panes without taking the eye off either.
+    //
+    // Each end of the line either reaches the edge of the grid or meets
+    // another divider. At the grid's edge it carries on through the padding to
+    // the edge of the view, so it divides the window and not just the text.
+    // Where it meets another divider it runs half a cell further, into that
+    // divider's gap, to join its hairline rather than stop short of it.
+    NSRect bounds = [gView bounds];
+    int gridRows = (int)floor((NSHeight(bounds) - 2 * gPad) / gLineHeight);
+    int gridCols = (int)floor((NSWidth(bounds) - 2 * gPad) / gCharWidth);
     NSRect line = gap;
     if (cols <= rows) { // a tall, narrow gap: the panes are side by side
         line.origin.x = NSMidX(gap) - 0.5;
         line.size.width = 1;
+        double top = row == 0 ? 0 : NSMinY(gap) - gLineHeight / 2;
+        double bottom = row + rows >= gridRows ? NSHeight(bounds) : NSMaxY(gap) + gLineHeight / 2;
+        line.origin.y = top;
+        line.size.height = bottom - top;
     } else {
         line.origin.y = NSMidY(gap) - 0.5;
         line.size.height = 1;
+        double left = col == 0 ? 0 : NSMinX(gap) - gCharWidth / 2;
+        double right = col + cols >= gridCols ? NSWidth(bounds) : NSMaxX(gap) + gCharWidth / 2;
+        line.origin.x = left;
+        line.size.width = right - left;
     }
     [dividerColor() setFill];
     NSRectFillUsingOperation(line, NSCompositingOperationSourceOver);
-}
-
-void shellterDimCells(int row, int col, int rows, int cols) {
-    [dimColor() setFill];
-    NSRectFillUsingOperation(cellRect(row, col, rows, cols), NSCompositingOperationSourceOver);
 }
 
 // stringFrom wraps borrowed bytes without needing them NUL-terminated. The

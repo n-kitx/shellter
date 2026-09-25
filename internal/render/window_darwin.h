@@ -26,9 +26,21 @@ void shellterSetTitle(const char *title);
 // actually asked for motion (?1003). Safe to call from any thread.
 void shellterSetMouseTracking(int enabled);
 
+// shellterBeep plays the system alert sound.
+void shellterBeep(void);
+
+// shellterSetCanSplit enables or disables the split menu items. Safe to call
+// from any thread.
+void shellterSetCanSplit(int can);
+
 // shellterConfirm shows a modal alert with the action and Cancel, and returns 1
 // if the action was chosen. Main thread only.
 int shellterConfirm(const char *message, const char *detail, const char *action);
+
+// shellterPrompt shows a modal alert with a text field holding initial, and
+// returns what was typed as a copy the caller must free, or NULL on Cancel.
+// Main thread only.
+char *shellterPrompt(const char *message, const char *detail, const char *initial);
 
 // The clipboard. shellterClipboard returns a copy the caller must free, or
 // NULL when the pasteboard holds no text.
@@ -63,9 +75,6 @@ void shellterEndPane(void);
 // shellterDrawDivider draws the line between two panes, inside the one-cell gap
 // the layout left for it.
 void shellterDrawDivider(int row, int col, int rows, int cols);
-// shellterDimCells lays a translucent wash over a pane that does not have the
-// focus, so the one that does stands out.
-void shellterDimCells(int row, int col, int rows, int cols);
 // shellterDrawCursor draws the cursor. fg and bg are the *cell's* own colours;
 // a block cursor inverts them, an underline or bar is painted in fg.
 // style: 0 block, 1 underline, 2 bar.

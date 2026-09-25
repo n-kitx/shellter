@@ -744,6 +744,10 @@ see, so that switching to one never shows a grid of the wrong shape.
 | `Cmd+D` | split the focused pane to the right |
 | `Cmd+Shift+D` | split it downwards |
 | `Cmd+Option+←↑↓→` | move the focus to the neighbouring pane |
+| `Cmd+Option+Shift+←↑↓→` | swap the focused pane with that neighbour |
+| drag a split divider | resize the panes; double click it to even them out |
+| double click a tab | rename it (empty gives the name back to the shell) |
+| drag a tab | move it along the bar |
 | `Cmd+W` | close the focused pane (the tab goes with its last one) |
 | `Cmd+C` / `Cmd+V` | copy the selection / paste |
 | `Cmd+A` | select everything this pane holds, history included |
@@ -774,6 +778,39 @@ goroutine blocked forever and the tab stuck in the list. A shell that exits
 closes the last slave descriptor, and *that* is what makes the read return EIO.
 The group rather than the shell alone, because a shell running vim would
 otherwise leave vim attached to a PTY with nobody on the other end.
+
+### Rearranging tabs and panes
+
+Everything in Shell and Split that moves something - dragging a divider,
+swapping two panes, Move Pane to New Tab, dragging a tab along the bar,
+renaming one - works on panes and tabs that already exist (`arrange.go`). No
+shell is started or stopped, so none of it needed anything new below the tree.
+
+A divider knows the split it divides and the rectangle that split shares out,
+so a drag is a pointer position turned back into that split's ratio, and
+`share` still enforces the minimum pane size. Moving a pane to a tab of its own
+is `tab.remove` on one tree and `newTab` with the same pane; the pane's reader
+goroutine looks its tab up on each chunk (`GUI.tabOf`) instead of remembering
+the one it started in, which is what lets a pane move at all.
+
+**Unfocused panes fade rather than darken.** With more than one pane, the ones
+without the focus are drawn with every colour moved 42% of the way towards the
+background (`render.fade`). An earlier version laid a translucent black wash
+over them instead, but a wash covers only the cell grid - not the padding, not
+the gap for the divider - so each inactive pane became a dark box with a light
+frame. Fading the colours leaves every background the window's own, and only
+the text recedes.
+
+**Four panes a tab.** Past that, every pane is too small to read on a laptop,
+and a new tab is the better answer; the split menu items grey out and the
+shortcuts beep.
+
+**A dragged tab is carried, not jumped.** It is drawn lifted, under the
+pointer; when its middle crosses into another tab's place Go reorders the list
+and the tabs it passed slide from where they were to where they now are. Each
+animation frame closes 38% of the remaining distance, so the slide starts fast
+and settles in about a fifth of a second, and the timer driving it exists only
+while a tab is actually off its place.
 
 ### New tabs open where you are
 
@@ -966,9 +1003,22 @@ happens, and cleared whenever an erase reaches the right edge. That second rule
 is what keeps it honest when a shell redraws a line shorter than it was:
 `\r`, the new text, `ESC [ K`.
 
-It is used for copying and **not** for reflow. Resizing still does not rewrap
-history, and the flags are dropped on resize rather than carried forward to say
-something untrue about a width that no longer exists.
+It is used for copying, and for **reflow**: on a resize, each run of wrapped
+rows - on screen and in history - is joined back into the line it was, then
+broken again at the new width (`internal/screen/reflow.go`). That is what makes
+closing a split give the surviving pane its full-width lines back instead of
+the ones cut at the width it was squeezed to. Rows that no longer fit the new
+height go into history, keeping the cursor's row on screen, so shrinking the
+window pushes the top away rather than cutting off the prompt at the bottom.
+Widening does not pull history back down: a screen the user cleared stays
+clear. The alternate screen is cropped, not reflowed - vim redraws anyway - but
+the shell's screen waiting behind it is reflowed, so it is right when vim exits.
+
+History is the bulk of the work, so it is rewrapped without a slice per line:
+one reused buffer gathers it, one scratch row breaks it, and the ring reuses
+its slots' memory. A resize with a full default history of wrapped lines costs
+0.9 ms (it was 4.4 ms and 17 MB of garbage before that was done), which is what
+dragging a divider - one resize per cell of movement - has to afford.
 
 ### Extraction has three rules
 

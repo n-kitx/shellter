@@ -123,3 +123,20 @@ func TestBlankSpansNeedNoText(t *testing.T) {
 		t.Fatal("an underlined run must still be drawn")
 	}
 }
+
+// An unfocused pane's colours move towards the background, but only part of
+// the way: the background itself is untouched, and text stays readable.
+func TestFade(t *testing.T) {
+	const bg = 0x1b1d22
+	if got := fade(bg, bg); got != bg {
+		t.Fatalf("fading the background changed it to %06x", got)
+	}
+	// Each channel moves the same fraction of its own distance: white's red
+	// goes from 0xff towards the background's 0x1b.
+	white := fade(0xffffff, bg)
+	red := white >> 16 & 0xff
+	from, to := 255.0, 27.0
+	if want := uint32(from + (to-from)*fadeAmount + 0.5); red != want {
+		t.Fatalf("white faded to %06x: red %02x, want %02x", white, red, want)
+	}
+}

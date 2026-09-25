@@ -60,6 +60,11 @@ type Config struct {
 	OnTabClose    func(index int)
 	OnNewTab      func()
 	OnTabPosition func(TabPosition)
+	// OnTabRename asks for a tab to be named (a double click on it, or the
+	// menu). OnTabMove reports a tab dragged from one place in the bar to
+	// another.
+	OnTabRename func(index int)
+	OnTabMove   func(from, to int)
 
 	// --- splits ---
 
@@ -68,6 +73,10 @@ type Config struct {
 	OnSplit     func(SplitDirection)
 	OnFocusPane func(Direction)
 	OnClosePane func()
+	// OnSwapPane exchanges the focused pane with its neighbour that way, and
+	// OnPaneToTab moves the focused pane out into a tab of its own.
+	OnSwapPane  func(Direction)
+	OnPaneToTab func()
 
 	// --- the clipboard ---
 

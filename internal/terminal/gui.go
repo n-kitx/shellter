@@ -82,6 +82,11 @@ type GUI struct {
 	// confirm, when set, answers the questions ask would put to the user.
 	// Tests set it; nothing else does.
 	confirm func(message, detail, action string) bool
+	// promptText, likewise, answers askText.
+	promptText func(message, detail, initial string) (string, bool)
+
+	// resizing is the divider being dragged, or nil. UI thread only.
+	resizing *resizing
 
 	// out, when set, replaces the active tab's PTY as the destination for
 	// encoded input. Tests set it; nothing else does.
@@ -144,6 +149,10 @@ func (g *GUI) Run() (int, error) {
 		OnPaste:       g.paste,
 		OnSelectAll:   g.selectAll,
 		OnClear:       g.clear,
+		OnTabRename:   g.renameTab,
+		OnTabMove:     g.moveTab,
+		OnSwapPane:    g.swapPane,
+		OnPaneToTab:   g.paneToTab,
 		OnSettings:    g.openSettings,
 		CanQuit:       g.canQuit,
 	})
@@ -179,7 +188,7 @@ func (g *GUI) openTab() (*tab, error) {
 	g.active = len(g.tabs) - 1
 	g.mu.Unlock()
 
-	g.startPane(tb, p)
+	g.startPane(p)
 	return tb, nil
 }
 
@@ -196,11 +205,34 @@ func (g *GUI) openPane(rows, cols int) (*pane, error) {
 
 // startPane gives a pane the goroutine that reads its PTY. One per pane,
 // exactly as there was one for the single session in Phase 5.
-func (g *GUI) startPane(tb *tab, p *pane) {
+//
+// Which tab the pane is in is looked up rather than remembered: a pane can be
+// moved to a tab of its own, and its reader must follow it there.
+func (g *GUI) startPane(p *pane) {
 	go func() {
-		p.pump(p.sess, func() { g.panePrinted(tb, p) })
-		g.forgetPane(tb, p)
+		p.pump(p.sess, func() {
+			if tb := g.tabOf(p); tb != nil {
+				g.panePrinted(tb, p)
+			}
+		})
+		g.forgetPane(p)
 	}()
+}
+
+// tabOf is the tab holding a pane, or nil if it is in none.
+func (g *GUI) tabOf(p *pane) *tab {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.tabOfLocked(p)
+}
+
+func (g *GUI) tabOfLocked(p *pane) *tab {
+	for _, tb := range g.tabs {
+		if tb.holds(p) {
+			return tb
+		}
+	}
+	return nil
 }
 
 // newTab is the "+" button and Cmd+T.
@@ -221,6 +253,15 @@ func (g *GUI) splitPane(dir render.SplitDirection) {
 	if tb == nil {
 		return
 	}
+	g.mu.Lock()
+	full := tb.full()
+	g.mu.Unlock()
+	if full {
+		// The menu items are greyed out at the limit; this is the shortcut,
+		// which has nowhere to be greyed out, answering the same way.
+		render.Beep()
+		return
+	}
 	// Started at the window's size and resized a moment later, once the tree
 	// knows how much of it this pane actually gets. Starting it at the final
 	// size would mean laying the tree out twice.
@@ -233,7 +274,7 @@ func (g *GUI) splitPane(dir render.SplitDirection) {
 	tb.split(p, splitDirOf(dir))
 	g.mu.Unlock()
 
-	g.startPane(tb, p)
+	g.startPane(p)
 	g.resizeAll()
 	g.syncTabs()
 	render.Redraw()
@@ -295,8 +336,13 @@ func (g *GUI) closeTab(index int) {
 
 // forgetPane removes a pane whose shell has gone. When it was the tab's last
 // pane the tab goes too, and when that was the last tab the window stops.
-func (g *GUI) forgetPane(tb *tab, p *pane) {
+func (g *GUI) forgetPane(p *pane) {
 	g.mu.Lock()
+	tb := g.tabOfLocked(p)
+	if tb == nil {
+		g.mu.Unlock()
+		return
+	}
 	alive := tb.remove(p)
 	g.mu.Unlock()
 
@@ -443,6 +489,12 @@ func (g *GUI) tabViews() []render.Tab {
 		// tell a retitle from the hundred prints that did not change anything.
 		t.shown = title
 		name, dir := label(title, g.shellName())
+		// A name the user gave replaces the words, not the facts: whether the
+		// tab is a shell at a prompt is still the shell's to say, so a renamed
+		// tab keeps its ">_" exactly when it would have had one anyway.
+		if t.name != "" {
+			name = t.name
+		}
 		out[i] = render.Tab{
 			Title:     name,
 			Activity:  t.activity,
@@ -468,8 +520,10 @@ func (g *GUI) shellName() string {
 func (g *GUI) syncTabs() {
 	g.mu.Lock()
 	tabs, active := g.tabViews(), g.active
+	canSplit := active < len(g.tabs) && !g.tabs[active].full()
 	g.mu.Unlock()
 	render.SetTabs(tabs, active, g.TabPosition)
+	render.SetCanSplit(canSplit)
 }
 
 // ---------------------------------------------------------------------------
@@ -720,6 +774,9 @@ func (g *GUI) scroll(lines, row, col int) {
 // happens before the report, so a program that does want the click sees it in
 // a pane that is already focused.
 func (g *GUI) mouse(m render.Mouse) {
+	if g.dragDivider(m) {
+		return
+	}
 	p, local := g.paneAt(m.Row, m.Col)
 	if p == nil {
 		return

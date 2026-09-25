@@ -194,10 +194,13 @@ func TestResizeDoesNotLeaveHalfCharacters(t *testing.T) {
 	s := New(2, 6)
 	feed(s, "a漢b")
 
-	s.Resize(2, 2) // the new right edge falls inside 漢
-	assertLine(t, s, 0, "a")
-	if got := s.Cell(0, 1).Rune; got != ' ' {
-		t.Fatalf("cell(0,1) = %q, want a blank rather than half a character", got)
+	// At two columns 漢 cannot follow "a" on its row, so the rewrap moves it
+	// whole to the next row rather than splitting it across the edge.
+	s.Resize(2, 2)
+	assertLine(t, s, 0, "漢")
+	assertLine(t, s, 1, "b")
+	if s.Cell(0, 0).Width() != 2 || !s.Cell(0, 1).IsContinuation() {
+		t.Fatal("漢 is not whole on its row")
 	}
 }
 

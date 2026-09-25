@@ -29,6 +29,10 @@ type tab struct {
 	// front - so the GUI's lock guards it.
 	activity bool
 
+	// name is what the user called the tab, or "" to name it after its shell.
+	// Guarded by the GUI's lock.
+	name string
+
 	// shown is the focused pane's title as the bar last heard it. A shell
 	// retitles itself at every prompt, so the bar is only told when the answer
 	// actually changed. Guarded by the GUI's lock, like activity.
@@ -67,6 +71,16 @@ const (
 	minPaneRows = 2
 )
 
+// maxPanes is how many panes one tab may be split into. Past four, every pane
+// is too small to be worth reading on a laptop screen, and a tab is the better
+// place for another shell.
+const maxPanes = 4
+
+// full reports whether the tab already has as many panes as it may.
+func (t *tab) full() bool {
+	return len(t.panes()) >= maxPanes
+}
+
 func newTab(p *pane) *tab {
 	return &tab{root: &node{pane: p}, focus: p}
 }
@@ -103,9 +117,15 @@ func (t *tab) layout(r rect, panes []placed, lines []divider) ([]placed, []divid
 }
 
 // divider is a line between two panes, one cell thick.
+//
+// It carries the split it divides and the rectangle that split shares out, so
+// that dragging it is a matter of turning a pointer position back into that
+// split's ratio.
 type divider struct {
 	rect     rect
 	vertical bool
+	split    *node
+	span     rect
 }
 
 func (n *node) place(r rect, panes *[]placed, lines *[]divider) {
@@ -121,6 +141,8 @@ func (n *node) place(r rect, panes *[]placed, lines *[]divider) {
 		*lines = append(*lines, divider{
 			rect:     rect{r.Row, r.Col + first, r.Rows, dividerCells},
 			vertical: true,
+			split:    n,
+			span:     r,
 		})
 		n.b.place(rect{r.Row, r.Col + first + dividerCells, r.Rows, rest}, panes, lines)
 		return
@@ -130,7 +152,9 @@ func (n *node) place(r rect, panes *[]placed, lines *[]divider) {
 	rest := r.Rows - first - dividerCells
 	n.a.place(rect{r.Row, r.Col, first, r.Cols}, panes, lines)
 	*lines = append(*lines, divider{
-		rect: rect{r.Row + first, r.Col, dividerCells, r.Cols},
+		rect:  rect{r.Row + first, r.Col, dividerCells, r.Cols},
+		split: n,
+		span:  r,
 	})
 	n.b.place(rect{r.Row + first + dividerCells, r.Col, rest, r.Cols}, panes, lines)
 }
@@ -263,6 +287,58 @@ func (t *tab) sole() *pane {
 		return t.root.pane
 	}
 	return nil
+}
+
+// dividerAt finds the divider covering a cell, for a drag.
+func (t *tab) dividerAt(r rect, row, col int) (divider, bool) {
+	_, lines := t.layout(r, nil, nil)
+	for _, d := range lines {
+		if d.rect.contains(row, col) {
+			return d, true
+		}
+	}
+	return divider{}, false
+}
+
+// moveTo sets the split's ratio so that its divider lands on a cell - the one
+// under the pointer - as nearly as the minimum pane sizes allow. share clamps
+// it; this only has to say where the first pane should end.
+func (d divider) moveTo(row, col int) {
+	pos, length := col-d.span.Col, d.span.Cols
+	if !d.vertical {
+		pos, length = row-d.span.Row, d.span.Rows
+	}
+	usable := length - dividerCells
+	if usable <= 0 {
+		return
+	}
+	d.split.ratio = clampRatio(float64(pos) / float64(usable))
+}
+
+func clampRatio(r float64) float64 {
+	if r < 0 {
+		return 0
+	}
+	if r > 1 {
+		return 1
+	}
+	return r
+}
+
+// swap exchanges two panes' places in the tree. Only the leaves change hands:
+// the splits and their ratios stay where they are, so the shape of the tab is
+// exactly what it was.
+func (t *tab) swap(a, b *pane) {
+	la, lb := t.leafOf(a), t.leafOf(b)
+	if la == nil || lb == nil || la == lb {
+		return
+	}
+	la.pane, lb.pane = b, a
+}
+
+// holds reports whether a pane is somewhere in this tab.
+func (t *tab) holds(p *pane) bool {
+	return t.root != nil && t.leafOf(p) != nil
 }
 
 // paneAt finds the pane covering a cell, for a click.

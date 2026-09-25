@@ -133,6 +133,13 @@ type Screen struct {
 	// A reset leaves them alone: clearing the screen does not move the shell.
 	dirHost, dirPath string
 
+	// Scratch for reflow, kept between resizes so that dragging a divider -
+	// a resize per cell of movement - does not allocate the history anew
+	// each time. See reflow.go.
+	reflowCells   []Cell
+	reflowEnds    []int
+	reflowScratch []Cell
+
 	// replies are bytes owed to the program in answer to a query. The
 	// application layer drains them into the PTY; see reply.go.
 	replies []byte
@@ -312,40 +319,36 @@ func (s *Screen) Reset() {
 	s.offset = 0
 }
 
-// Resize changes the grid, keeping the top-left corner of the old contents.
-//
-// Real terminals reflow wrapped lines on resize; that needs to know which line
-// endings were soft wraps, which is a later phase's problem.
+// Resize changes the grid. On the primary screen the text is reflowed to the
+// new width - see reflow.go - and on the alternate screen it is cropped, since
+// the program there redraws.
 func (s *Screen) Resize(rows, cols int) {
 	if rows < 1 || cols < 1 || (rows == s.rows && cols == s.cols) {
 		return
 	}
-	// The new grid is built in logical order, which is also what puts the row
-	// index back to the identity: a resize is the one moment the arrangement is
-	// worth normalising.
-	next := make([]Cell, rows*cols)
-	for i := range next {
-		next[i] = Blank
-	}
-	for row := 0; row < min(rows, s.rows); row++ {
-		src := s.row(row)
-		copy(next[row*cols:(row+1)*cols], src[:min(cols, s.cols)])
-	}
-	// The buffer that is off screen has to change shape too, or leaving the
-	// alternate screen would restore a grid of the old size.
-	s.resizeInactive(rows, cols)
 
-	s.rows, s.cols, s.cells = rows, cols, next
+	if s.altActive {
+		// A full-screen program is told its new size and redraws, so its grid
+		// is simply cropped or extended. The shell's screen behind it is
+		// reflowed, so that it is right when the program exits.
+		s.cells = cropGrid(s.rows, s.cols, s.row, rows, cols)
+		s.wrapped = make([]bool, rows)
+		s.cur.Row = clamp(s.cur.Row, 0, rows-1)
+		s.cur.Col = clamp(s.cur.Col, 0, cols-1)
+		s.reflowInactive(rows, cols)
+	} else {
+		cells, wrapped, cur := s.reflowPrimary(gridRows{
+			rows: s.rows, cols: s.cols, row: s.row, wrapped: s.rowWrapped,
+		}, s.cur, s.pendingWrap, rows, cols)
+		s.cells, s.wrapped, s.cur = cells, wrapped, cur
+	}
+
+	s.rows, s.cols = rows, cols
 	s.rowIndex = identityRows(rows)
-	// Wrap flags describe where a line broke at the OLD width, which tells us
-	// nothing about where it breaks at the new one. Reflow is what would fix
-	// that, and this terminal does not reflow, so they are dropped rather than
-	// carried forward to say something untrue.
-	s.wrapped = make([]bool, rows)
-	s.cur.Row = clamp(s.cur.Row, 0, rows-1)
-	s.cur.Col = clamp(s.cur.Col, 0, cols-1)
 	s.pendingWrap = false
-	s.offset = clamp(s.offset, 0, s.sb.Len())
+	s.offset = 0
+	s.saved.cur.Row = clamp(s.saved.cur.Row, 0, rows-1)
+	s.saved.cur.Col = clamp(s.saved.cur.Col, 0, cols-1)
 
 	// A scroll region describes rows that may no longer exist, so it opens back
 	// up - which is also what xterm does. The program is told about the resize
@@ -353,6 +356,19 @@ func (s *Screen) Resize(rows, cols int) {
 	s.resetScrollRegion()
 	s.resizeTabs(cols)
 	s.repairWide()
+}
+
+// cropGrid copies a grid into a new size, keeping the top-left corner: what
+// fits stays where it was, and the rest is cut or left blank.
+func cropGrid(oldRows, oldCols int, row func(int) []Cell, rows, cols int) []Cell {
+	next := make([]Cell, rows*cols)
+	for i := range next {
+		next[i] = Blank
+	}
+	for r := 0; r < min(rows, oldRows); r++ {
+		copy(next[r*cols:(r+1)*cols], row(r)[:min(cols, oldCols)])
+	}
+	return next
 }
 
 // repairWide blanks any wide character left without its continuation, or any

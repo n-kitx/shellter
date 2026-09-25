@@ -150,6 +150,20 @@ func Clipboard() string {
 	return C.GoString(p)
 }
 
+// Beep is the system alert sound: the answer to a command that cannot be
+// carried out, when there is nothing else to show.
+func Beep() { C.shellterBeep() }
+
+// SetCanSplit greys the Split Right and Split Down menu items out, or back in.
+// Safe from any goroutine.
+func SetCanSplit(can bool) {
+	var on C.int
+	if can {
+		on = 1
+	}
+	C.shellterSetCanSplit(on)
+}
+
 // Confirm asks a yes/no question in a modal alert: message is the question,
 // detail says why it is being asked, and action labels the button that goes
 // ahead (the other is Cancel). It returns true for the action.
@@ -161,6 +175,23 @@ func Confirm(message, detail, action string) bool {
 	defer C.free(unsafe.Pointer(d))
 	defer C.free(unsafe.Pointer(a))
 	return C.shellterConfirm(m, d, a) != 0
+}
+
+// Prompt asks for one line of text in a modal alert, starting from initial.
+// It returns what was typed and true, or false if the user cancelled.
+//
+// Main thread only, like Confirm.
+func Prompt(message, detail, initial string) (string, bool) {
+	m, d, i := C.CString(message), C.CString(detail), C.CString(initial)
+	defer C.free(unsafe.Pointer(m))
+	defer C.free(unsafe.Pointer(d))
+	defer C.free(unsafe.Pointer(i))
+	out := C.shellterPrompt(m, d, i)
+	if out == nil {
+		return "", false
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoString(out), true
 }
 
 // OpenInEditor opens a text file in the user's default editor for text - the
@@ -215,29 +246,23 @@ func shellterGoRender() {
 
 	C.shellterClear(C.uint(layout.DefaultBG))
 
+	split := len(layout.Panes) > 1
 	for _, p := range layout.Panes {
-		drawPane(p, layout.DefaultBG)
+		drawPane(p, layout.DefaultBG, split && !p.Focused)
 	}
 	for _, d := range layout.Dividers {
 		C.shellterDrawDivider(C.int(d.Row), C.int(d.Col), C.int(d.Rows), C.int(d.Cols))
-	}
-	// Dimming last, over everything the pane drew. One translucent rectangle is
-	// cheaper than recolouring every cell, and it dims the background as well,
-	// which recolouring the text alone would not.
-	if len(layout.Panes) > 1 {
-		for _, p := range layout.Panes {
-			if !p.Focused {
-				C.shellterDimCells(C.int(p.Rect.Row), C.int(p.Rect.Col),
-					C.int(p.Rect.Rows), C.int(p.Rect.Cols))
-			}
-		}
 	}
 }
 
 // drawPane paints one pane's grid, offset into the window's coordinates. The
 // pane's own frame counts from its top-left corner and knows nothing about
 // where it sits.
-func drawPane(p Pane, defaultBG uint32) {
+//
+// faded is set for a pane that is not the focused one of several: its colours
+// are drawn part way towards the background, so the focused pane is the one
+// that reads at full strength.
+func drawPane(p Pane, defaultBG uint32, faded bool) {
 	f := p.Frame
 	row, col := p.Rect.Row, p.Rect.Col
 
@@ -245,14 +270,18 @@ func drawPane(p Pane, defaultBG uint32) {
 	defer C.shellterEndPane()
 
 	for _, sp := range spans(f) {
-		if sp.BG != defaultBG {
-			C.shellterFillCells(C.int(row+sp.Row), C.int(col+sp.Col), C.int(sp.Width), C.uint(sp.BG))
+		fg, bg := sp.FG, sp.BG
+		if faded {
+			fg, bg = fade(fg, defaultBG), fade(bg, defaultBG)
+		}
+		if bg != defaultBG {
+			C.shellterFillCells(C.int(row+sp.Row), C.int(col+sp.Col), C.int(sp.Width), C.uint(bg))
 		}
 		if sp.blank() {
 			continue // the fill said everything there was to say
 		}
 		C.shellterDrawText(C.int(row+sp.Row), C.int(col+sp.Col),
-			bytesOf(sp.Text), C.int(len(sp.Text)), C.uint(sp.FG), C.uint(sp.Flags))
+			bytesOf(sp.Text), C.int(len(sp.Text)), C.uint(fg), C.uint(sp.Flags))
 	}
 
 	// Only the focused pane shows a cursor: two cursors on screen would both
@@ -433,6 +462,42 @@ func shellterGoCopy() {
 func shellterGoPaste() {
 	if cfg := config(); cfg != nil && cfg.OnPaste != nil {
 		cfg.OnPaste()
+	}
+}
+
+// shellterGoTabRename reports a double click on a tab, or Rename Tab.
+//
+//export shellterGoTabRename
+func shellterGoTabRename(index C.int) {
+	if cfg := config(); cfg != nil && cfg.OnTabRename != nil {
+		cfg.OnTabRename(int(index))
+	}
+}
+
+// shellterGoTabMove reports a tab dragged to another place in the bar.
+//
+//export shellterGoTabMove
+func shellterGoTabMove(from, to C.int) {
+	if cfg := config(); cfg != nil && cfg.OnTabMove != nil {
+		cfg.OnTabMove(int(from), int(to))
+	}
+}
+
+// shellterGoSwapPane reports one of the Swap Pane menu items.
+//
+//export shellterGoSwapPane
+func shellterGoSwapPane(dir C.int) {
+	if cfg := config(); cfg != nil && cfg.OnSwapPane != nil {
+		cfg.OnSwapPane(Direction(dir))
+	}
+}
+
+// shellterGoPaneToTab reports Move Pane to New Tab.
+//
+//export shellterGoPaneToTab
+func shellterGoPaneToTab() {
+	if cfg := config(); cfg != nil && cfg.OnPaneToTab != nil {
+		cfg.OnPaneToTab()
 	}
 }
 

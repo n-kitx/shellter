@@ -91,15 +91,30 @@ DCS payloads print as visible garbage.
 - [ ] Right-click menu (Copy, Paste, Clear, Split).
 - [ ] URL detection and Cmd+click to open URLs / paths.
 - [ ] Drag a file onto the window to paste its path.
-- [ ] Reflow on resize. Soft line breaks are recorded (`wrapped []bool`); the
-      rewrap is the missing half.
+- [x] Reflow on resize, history included (`screen/reflow.go`). Wide
+      characters never straddle the edge. Alternate screen is cropped; the
+      primary behind it is reflowed. ~0.9 ms per resize at the default 1000
+      lines of history.
 
 ## Tabs and splits
 
-- [ ] Rename a tab.
-- [ ] Drag to reorder tabs; tear a tab off into a new window.
-- [ ] Drag a split divider (splits are always down the middle).
-- [ ] Swap panes; turn a pane back into a tab.
+- [x] Rename a tab: double click it, or Shell > Rename Tab... An empty name
+      hands naming back to the shell. A renamed tab keeps its `>_` whenever an
+      unnamed one would.
+- [x] Drag to reorder tabs: the tab is lifted (shadow) and follows the
+      pointer; the tabs it passes slide aside, and it settles into place on
+      release. A 60 Hz timer runs only while something is moving.
+- [ ] Tear a tab off into a new window - needs Cmd+N / multiple windows first.
+- [x] Drag a split divider, with a resize cursor over it; double click puts it
+      back in the middle. Not remembered. Divider lines run to the window's
+      edge and join each other at junctions.
+- [x] At most 4 panes per tab: the Split items grey out, the shortcuts beep.
+- [x] Unfocused panes fade their colours towards the background instead of
+      being covered by a dark wash (which left boxed-in panes with light
+      borders).
+- [x] Swap panes (Cmd+Option+Shift+arrows); Split > Move Pane to New Tab.
+      Nothing restarts - the pane moves between trees, and its reader looks
+      its tab up rather than remembering it (`GUI.tabOf`).
 
 ## Text and rendering
 

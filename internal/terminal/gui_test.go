@@ -109,11 +109,15 @@ func TestResizeUpdatesTheScreen(t *testing.T) {
 	if f.Rows != 2 || f.Cols != 4 {
 		t.Fatalf("frame size = %dx%d, want 2x4", f.Rows, f.Cols)
 	}
+	// "hello" rewraps at four columns, and the cursor stays after the "o".
 	if got := frameLine(f, 0); got != "hell" {
 		t.Fatalf("row 0 = %q, want %q", got, "hell")
 	}
-	if f.CursorCol != 3 {
-		t.Fatalf("cursor col = %d, want it clamped to 3", f.CursorCol)
+	if got := frameLine(f, 1); got != "o   " {
+		t.Fatalf("row 1 = %q, want %q", got, "o   ")
+	}
+	if f.CursorRow != 1 || f.CursorCol != 1 {
+		t.Fatalf("cursor = %d,%d, want 1,1 - just after the o", f.CursorRow, f.CursorCol)
 	}
 }
 

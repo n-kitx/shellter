@@ -135,3 +135,22 @@ func BenchmarkResize(b *testing.B) {
 		}
 	}
 }
+
+// A resize reflows the whole history, so its cost grows with it. This is the
+// worst ordinary case: a full default scrollback of wrapped lines, resized
+// back and forth the way dragging a divider does.
+func BenchmarkResizeFullHistory(b *testing.B) {
+	s := NewWithScrollback(40, 120, DefaultScrollback)
+	line := strings.Repeat("0123456789", 18) + "\r\n" // wraps once at 120
+	for i := 0; i < DefaultScrollback; i++ {
+		feed(s, line)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if i%2 == 0 {
+			s.Resize(40, 119)
+		} else {
+			s.Resize(40, 120)
+		}
+	}
+}

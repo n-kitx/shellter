@@ -239,3 +239,24 @@ func (r Span) blank() bool {
 	}
 	return true
 }
+
+// fadeAmount is how far an unfocused pane's colours move towards the
+// background: enough that the focused pane is plainly the one being typed in,
+// not so much that the others look switched off.
+const fadeAmount = 0.42
+
+// fade moves a colour part of the way towards the background.
+//
+// This is how an unfocused pane is told apart, rather than a darkening wash
+// laid over it: a wash covers only the cells, and stops short of the padding
+// and the divider, so each inactive pane became a darker box with a light
+// border round it. Fading the colours leaves every background exactly the
+// window's own, and only the text recedes.
+func fade(rgb, bg uint32) uint32 {
+	mix := func(shift uint) uint32 {
+		a := float64((rgb >> shift) & 0xff)
+		b := float64((bg >> shift) & 0xff)
+		return uint32(a+(b-a)*fadeAmount+0.5) << shift
+	}
+	return mix(16) | mix(8) | mix(0)
+}

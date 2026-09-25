@@ -115,6 +115,16 @@ func (sb *scrollback) lineInto(dst []Cell, i int) []Cell {
 	return dst
 }
 
+// reset empties the ring but keeps the memory each slot holds, for a reflow
+// that is about to refill it with the same lines at a new width. Unlike clear
+// it does not count the lines as dropped: they are coming straight back.
+func (sb *scrollback) reset() {
+	for i := range sb.wrapped {
+		sb.wrapped[i] = false
+	}
+	sb.start, sb.count = 0, 0
+}
+
 // clear forgets all history.
 func (sb *scrollback) clear() {
 	for i := range sb.lines {
