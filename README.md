@@ -737,7 +737,7 @@ see, so that switching to one never shows a grid of the wrong shape.
 
 | | |
 | --- | --- |
-| `Cmd+T` | new tab |
+| `Cmd+T` | new tab, in the focused pane's directory (splits too) |
 | `Cmd+Shift+W` | close tab, panes and all |
 | `Cmd+Shift+]` / `Cmd+Shift+[` | next / previous tab |
 | `Cmd+1` … `Cmd+9` | go to tab *n* |
@@ -774,6 +774,21 @@ goroutine blocked forever and the tab stuck in the list. A shell that exits
 closes the last slave descriptor, and *that* is what makes the read return EIO.
 The group rather than the shell alone, because a shell running vim would
 otherwise leave vim attached to a PTY with nobody on the other end.
+
+### New tabs open where you are
+
+A new tab or split starts in the directory the focused pane's shell is in.
+Two sources answer that. A shell can say where it is with OSC 7
+(`ESC ] 7 ; file://host/path BEL`), which `screen.Screen` records - but zsh as
+macOS ships it says nothing unless it is running inside Terminal.app. So the
+kernel is asked as well: `proc_pidinfo(PROC_PIDVNODEPATHINFO)` gives any
+process's working directory, the shell's included, with no cooperation from
+it (`shell.Session.Dir`).
+
+The shell's own report wins only when it names this machine and a directory
+that exists here. Over ssh it describes the remote machine, where "open a tab
+in /srv/app" means nothing locally; the kernel's answer, the directory ssh was
+started from, is the right one then.
 
 ### Asking before closing something that is running
 
@@ -1221,6 +1236,25 @@ zsh output ──► parser ──► screen.appCursor ──┐
 key press ─────────────────────────► input.Encode ──► PTY ──► zsh
 ```
 
+**Text goes through macOS's input system first.** The view is an
+`NSTextInputClient`, and a keystroke that is text is handed to
+`interpretKeyEvents:` before anything reaches Go. That is what makes dead keys
+(Option+E, then E, is one `é`), input methods for Chinese, Japanese and Korean,
+and the emoji picker work: the input method *composes*, and only what it
+commits arrives in `insertText:` and goes to the shell. While it composes, the
+unfinished text is drawn underlined over the cells at the cursor, and the
+candidate window is placed there.
+
+Commands skip it. Ctrl and Cmd combinations and the special keys - Return, Tab,
+Escape, Delete, arrows, function keys - go straight to `input.Encode` as they
+always did, so Ctrl+C never waits on an input method. The exception is while a
+composition is open: then every key is the input method's, because Return
+confirms a conversion and Escape abandons it.
+
+Press-and-hold is switched off for Shellter (`ApplePressAndHoldEnabled`), as
+iTerm does, because with keys going through the input system, holding `j` in
+vim would otherwise offer accented j's rather than repeat.
+
 ## The screen buffer
 
 `screen.Screen` is a `[]Cell` plus a `Cursor{Row, Col}`, both zero-based. The
@@ -1319,6 +1353,20 @@ The artwork lives in `assets/Shellter.png`, one 1024-pixel picture; the script
 resizes it into the ten sizes macOS asks for and packs them with `iconutil`.
 The bundle is signed ad-hoc, which is enough to give it a stable identity on
 this machine — not enough to get it past Gatekeeper on anyone else's.
+
+**Protected folders.** macOS attributes whatever the shell opens to the app
+it runs in, so a `.zshrc` that sources a file under `~/Downloads` is Shellter
+asking for `~/Downloads`, and the first launch asks you. The purpose strings in
+`Info.plist` are the text of that prompt. A refusal is remembered and not asked
+again — the shell just gets `operation not permitted` — and so is a grant, but
+against the app's signature: an ad-hoc signature is the hash of the binary,
+so every `bundle.sh` is a new app to macOS. To keep grants across rebuilds,
+sign with a certificate (a self-signed one from Keychain Access will do):
+
+```sh
+SHELLTER_SIGN_IDENTITY="Shellter Dev" ./scripts/bundle.sh
+tccutil reset SystemPolicyDownloadsFolder com.thakurankit7.shellter  # forget a refusal
+```
 
 Launched from the Dock, Shellter inherits launchd's world rather than a
 shell's: the working directory is `/` and there is no locale. So the shell is

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -156,6 +157,57 @@ func (p *pane) running() string {
 		return ""
 	}
 	return p.sess.Running()
+}
+
+// directory is where this pane's shell is working, for a new tab or split to
+// start in, or "" when that cannot be known - including for a nil pane, so that
+// "the focused pane's directory" needs no check that there is one.
+//
+// The shell's own report (OSC 7) comes first, but only when it names this
+// machine: over ssh it names a directory on the other one, and the local
+// kernel's answer - the directory ssh itself was started in - is the right
+// one. The kernel is also the answer for a shell that reports nothing, which
+// is zsh as it comes.
+func (p *pane) directory() string {
+	if p == nil {
+		return ""
+	}
+	p.mu.Lock()
+	host, path := p.scr.Directory()
+	p.mu.Unlock()
+	if path != "" && isLocalHost(host) && isDir(path) {
+		return path
+	}
+
+	p.io.Lock()
+	defer p.io.Unlock()
+	if p.sess == nil || p.gone {
+		return ""
+	}
+	return p.sess.Dir()
+}
+
+// isLocalHost reports whether an OSC 7 host names this machine. Shells send
+// the short name, the .local name or nothing at all, so the comparison is on
+// the first label and ignores case.
+func isLocalHost(host string) bool {
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return true
+	}
+	name, err := os.Hostname()
+	if err != nil {
+		return false
+	}
+	short := func(h string) string {
+		h, _, _ = strings.Cut(h, ".")
+		return strings.ToLower(h)
+	}
+	return short(host) == short(name)
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // close ends the session. The shell is hung up on rather than having its PTY

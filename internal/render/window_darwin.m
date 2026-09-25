@@ -202,7 +202,26 @@ static NSFont *fontForFlags(unsigned int flags) {
 // The view
 // ---------------------------------------------------------------------------
 
-@interface ShellterView : NSView
+// cellOrigin is the top-left pixel of a cell, padding included. Everything that
+// draws goes through it, so the inset is defined once.
+static NSPoint cellOrigin(int row, int col) {
+    return NSMakePoint(gPad + col * gCharWidth, gPad + row * gLineHeight);
+}
+
+// Text being composed by an input method - a Japanese reading before it is
+// converted, or the accent of a dead key waiting for its letter. It belongs to
+// the input method until it is committed, so it is drawn over the grid at the
+// cursor rather than sent to the shell.
+static NSAttributedString *gMarked = nil;
+static NSRange gMarkedSelection = {0, 0};
+// The key event being interpreted, for doCommandBySelector: to fall back on.
+static NSEvent *gKeyEvent = nil;
+// Where the cursor was last drawn, and the colours of the cell under it: the
+// composition is drawn there, and the candidate window placed next to it.
+static int gCursorRow = 0, gCursorCol = 0;
+static unsigned int gCursorFG = 0xffffff, gCursorBG = 0;
+
+@interface ShellterView : NSView <NSTextInputClient>
 @end
 
 @implementation ShellterView
@@ -235,13 +254,71 @@ static NSFont *fontForFlags(unsigned int flags) {
     // text call per span, then the cursor. Keeping the loop on the Go side
     // means the grid never has to be copied across the boundary.
     shellterGoRender();
+    [self drawMarkedText];
+}
+
+// drawMarkedText paints a composition in progress over the cells at the
+// cursor, underlined the way every Mac text field marks one. It covers the
+// cells rather than pushing them along: nothing has been typed yet.
+- (void)drawMarkedText {
+    if ([gMarked length] == 0) {
+        return;
+    }
+    NSString *text = [gMarked string];
+    NSDictionary *attrs = @{
+        NSFontAttributeName : gFont,
+        NSForegroundColorAttributeName : colorFromRGB(gCursorFG),
+        NSUnderlineStyleAttributeName : @(NSUnderlineStyleSingle),
+    };
+    double w = ceil([text sizeWithAttributes:attrs].width / gCharWidth) * gCharWidth;
+    NSPoint o = cellOrigin(gCursorRow, gCursorCol);
+    [colorFromRGB(gCursorBG) setFill];
+    NSRectFill(NSMakeRect(o.x, o.y, w, gLineHeight));
+    [text drawAtPoint:o withAttributes:attrs];
 }
 
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 
+// isSpecialKey reports whether a key is a command to the terminal rather than
+// text: Return, Tab, Escape, Delete, the arrows, the function keys. AppKit
+// reports those as control characters or in the private-use block.
+static BOOL isSpecialKey(NSEvent *event) {
+    NSString *base = [event charactersIgnoringModifiers];
+    if ([base length] == 0) {
+        return YES; // a dead key alone has no characters; see keyDown:
+    }
+    unichar c = [base characterAtIndex:0];
+    return c < 0x20 || c == 0x7f || (c >= 0xF700 && c <= 0xF8FF);
+}
+
+// keyDown: decides who a key belongs to.
+//
+// Most keys go to macOS's text input system first, which is what makes input
+// methods and dead keys work at all: Option+E then E is one "é", and a
+// Japanese reading is converted before anything reaches the shell. What comes
+// out the other end arrives in insertText:.
+//
+// Keys that are commands rather than text go straight to Go, as they always
+// did - Ctrl+C must not wait on an input method, and Return must not be
+// turned into "insertNewline:". While a composition is open, though, every key
+// is the input method's: Return confirms it, Escape abandons it, and the arrows
+// move between candidates.
 - (void)keyDown:(NSEvent *)event {
+    unsigned int mods = modsFromEvent(event);
+    BOOL command = (mods & ((1 << 1) | (1 << 3))) != 0; // Control or Command
+    if (![self hasMarkedText] && (command || (isSpecialKey(event) && [[event characters] length] > 0))) {
+        [self sendKey:event];
+        return;
+    }
+    gKeyEvent = event;
+    [self interpretKeyEvents:@[ event ]];
+    gKeyEvent = nil;
+}
+
+// sendKey hands a key to Go as the key it is.
+- (void)sendKey:(NSEvent *)event {
     // Two strings, because they answer two different questions:
     //   -characters                 what the key types  ('A' for Shift+a)
     //   -charactersIgnoringModifiers which key it is    ('a', or 0xF702 for Left)
@@ -264,6 +341,103 @@ static NSFont *fontForFlags(unsigned int flags) {
     }
     shellterGoKey((char *)charsUTF8, (int)strlen(charsUTF8),
                   (char *)baseUTF8, (int)strlen(baseUTF8), mods);
+}
+
+// sendText hands Go text the input system has committed. It is typed text and
+// nothing else, so it travels as characters with no modifiers: Go sends it to
+// the shell as UTF-8, exactly as it does a plain keystroke.
+static void sendText(NSString *text) {
+    const char *utf8 = [text UTF8String];
+    if (utf8 == NULL || *utf8 == 0) {
+        return;
+    }
+    shellterGoKey((char *)utf8, (int)strlen(utf8), (char *)utf8, (int)strlen(utf8), 0);
+}
+
+// ---------------------------------------------------------------------------
+// NSTextInputClient: the conversation with input methods
+// ---------------------------------------------------------------------------
+
+static NSString *plainString(id string) {
+    return [string isKindOfClass:[NSAttributedString class]] ? [string string] : string;
+}
+
+- (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
+    [self clearMarkedText];
+    sendText(plainString(string));
+}
+
+- (void)setMarkedText:(id)string
+        selectedRange:(NSRange)selectedRange
+     replacementRange:(NSRange)replacementRange {
+    NSAttributedString *marked = [string isKindOfClass:[NSAttributedString class]]
+                                     ? [[string copy] autorelease]
+                                     : [[[NSAttributedString alloc] initWithString:string] autorelease];
+    [gMarked release];
+    gMarked = [marked length] > 0 ? [marked retain] : nil;
+    gMarkedSelection = selectedRange;
+    [self setNeedsDisplay:YES];
+}
+
+// unmarkText is AppKit ending a composition from outside - the window losing
+// focus, say. What was composed is kept, the way a text field keeps it.
+- (void)unmarkText {
+    NSString *text = [[[gMarked string] copy] autorelease];
+    [self clearMarkedText];
+    if ([text length] > 0) {
+        sendText(text);
+    }
+}
+
+- (void)clearMarkedText {
+    if (gMarked != nil) {
+        [gMarked release];
+        gMarked = nil;
+        [self setNeedsDisplay:YES];
+    }
+}
+
+- (BOOL)hasMarkedText {
+    return [gMarked length] > 0;
+}
+
+- (NSRange)markedRange {
+    return [self hasMarkedText] ? NSMakeRange(0, [gMarked length]) : NSMakeRange(NSNotFound, 0);
+}
+
+- (NSRange)selectedRange {
+    return [self hasMarkedText] ? gMarkedSelection : NSMakeRange(0, 0);
+}
+
+// A key the input system recognised as a command - Return while nothing was
+// being composed, say, or one the input method passed on. It goes to Go as the
+// key it was, since Go already knows what every key means to a terminal.
+- (void)doCommandBySelector:(SEL)selector {
+    if (gKeyEvent != nil) {
+        [self sendKey:gKeyEvent];
+    }
+}
+
+// The candidate window sits under the cursor, which is where the text will go.
+- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+    NSPoint o = cellOrigin(gCursorRow, gCursorCol);
+    NSRect r = NSMakeRect(o.x, o.y, gCharWidth, gLineHeight);
+    return [[self window] convertRectToScreen:[self convertRect:r toView:nil]];
+}
+
+// The terminal has no document for an input method to read back or point into:
+// the shell owns the line being edited, not us.
+- (NSArray<NSAttributedStringKey> *)validAttributesForMarkedText {
+    return @[];
+}
+
+- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range
+                                                actualRange:(NSRangePointer)actualRange {
+    return nil;
+}
+
+- (NSUInteger)characterIndexForPoint:(NSPoint)point {
+    return NSNotFound;
 }
 
 // cellForEvent converts a mouse location into grid coordinates. This is the
@@ -1202,10 +1376,8 @@ static void installMenu(id target) {
     item(viewMenu, @"Bigger", @selector(biggerText:), @"=", cmd, target);
     item(viewMenu, @"Smaller", @selector(smallerText:), @"-", cmd, target);
     item(viewMenu, @"Actual Size", @selector(actualSizeText:), @"0", cmd, target);
-    [viewMenu addItem:[NSMenuItem separatorItem]];
-    // AppKit retitles this "Exit Full Screen" by itself while it applies.
-    item(viewMenu, @"Enter Full Screen", @selector(toggleFullScreen:), @"f",
-         cmd | NSEventModifierFlagControl, nil);
+    // No Enter Full Screen here: AppKit adds its own to a menu titled "View",
+    // with the system's shortcut, and a second one would sit beside it.
     [viewItem setSubmenu:viewMenu];
 
     // The Window menu. Handing it to NSApp is what makes AppKit list the
@@ -1231,6 +1403,12 @@ void shellterRun(const char *title, int rows, int cols, double fontSize, double 
         gOpacity = opacity;
         gChromeRGB = background;
         [NSApplication sharedApplication];
+        // Keys go through the text input system now, and with press-and-hold
+        // on, holding one down offers accented letters instead of repeating
+        // it - which is not what holding j in vim is for. Only our default is
+        // changed; `defaults write` can still turn it back on for Shellter.
+        [[NSUserDefaults standardUserDefaults]
+            registerDefaults:@{@"ApplePressAndHoldEnabled" : @NO}];
         // Without a .app bundle the process is an "accessory" by default: no
         // Dock icon, no keyboard focus. Terminals need both.
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -1457,12 +1635,6 @@ void shellterClear(unsigned int rgb) {
     NSRectFillUsingOperation([gView bounds], NSCompositingOperationSourceOver);
 }
 
-// cellOrigin is the top-left pixel of a cell, padding included. Everything that
-// draws goes through it, so the inset is defined once.
-static NSPoint cellOrigin(int row, int col) {
-    return NSMakePoint(gPad + col * gCharWidth, gPad + row * gLineHeight);
-}
-
 void shellterFillCells(int row, int col, int width, unsigned int rgb) {
     NSPoint o = cellOrigin(row, col);
     NSRect r = NSMakeRect(o.x, o.y, width * gCharWidth, gLineHeight);
@@ -1551,6 +1723,10 @@ void shellterDrawText(int row, int col, const char *utf8, int len,
 // the span pass has already painted correctly.
 void shellterDrawCursor(int row, int col, int width, const char *utf8, int len,
                         unsigned int fg, unsigned int bg, int style) {
+    gCursorRow = row;
+    gCursorCol = col;
+    gCursorFG = fg;
+    gCursorBG = bg;
     NSPoint o = cellOrigin(row, col);
     double x = o.x, y = o.y;
 

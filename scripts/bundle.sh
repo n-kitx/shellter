@@ -11,6 +11,9 @@
 #   ./scripts/bundle.sh          -> build/Shellter.app
 #   open build/Shellter.app
 #
+# Set SHELLTER_SIGN_IDENTITY to the name of a code-signing certificate in your
+# keychain to sign with it instead of ad hoc; see the signature step below.
+#
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -57,14 +60,35 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>    <string>11.0</string>
     <key>NSHighResolutionCapable</key>   <true/>
     <key>NSPrincipalClass</key>          <string>NSApplication</string>
+
+    <!-- Why the shell in a terminal reaches into protected folders. macOS
+         attributes whatever the shell and its programs open to this app, so
+         a .zshrc that sources a file in ~/Downloads is Shellter asking for
+         ~/Downloads. These are the words in the prompt that asks. -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Programs you run in Shellter can read and write files on your Desktop.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Programs you run in Shellter can read and write files in your Documents folder.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Programs you run in Shellter can read and write files in your Downloads folder.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>Programs you run in Shellter can read and write files on network volumes.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Programs you run in Shellter can read and write files on removable volumes.</string>
 </dict>
 </plist>
 PLIST
 
-# Ad-hoc signature. Not a Developer ID - it does not get the app past
-# Gatekeeper on another Mac - but it gives the bundle a stable identity here,
-# which is what the keychain and the permissions database key off.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+# The signature is the app's identity to macOS, and the permissions database
+# (Downloads, Documents, Full Disk Access) remembers a grant against it.
+#
+# Ad hoc is the default because it needs nothing set up, but an ad-hoc
+# identity is the hash of the binary: every rebuild is, to macOS, a different
+# app, and a grant made to the last build does not carry over. A certificate -
+# even a self-signed one made in Keychain Access - is an identity that
+# survives rebuilds. Neither gets the app past Gatekeeper on another Mac;
+# that takes a Developer ID.
+codesign --force --sign "${SHELLTER_SIGN_IDENTITY:--}" "$APP" >/dev/null 2>&1 || true
 
 # Finder caches icons per bundle path, and will happily show the old one.
 touch "$APP"

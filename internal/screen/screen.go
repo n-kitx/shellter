@@ -7,6 +7,7 @@
 package screen
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/thakurankit7/shellter/internal/parser"
@@ -127,6 +128,10 @@ type Screen struct {
 	// titles a program has pushed aside while it borrows the window.
 	title      string
 	titleStack []string
+
+	// dirHost and dirPath are where the shell last said it was, through OSC 7.
+	// A reset leaves them alone: clearing the screen does not move the shell.
+	dirHost, dirPath string
 
 	// replies are bytes owed to the program in answer to a query. The
 	// application layer drains them into the PTY; see reply.go.
@@ -495,8 +500,26 @@ func (s *Screen) osc(data string) {
 	switch cmd {
 	case "0", "2":
 		s.title = text
+	case "7":
+		s.setDirectory(text)
 	}
 }
+
+// setDirectory records an OSC 7 report: "file://host/path", with the path
+// percent-encoded the way any URL's is. The host is kept, not checked - a
+// shell on the far end of ssh reports its own machine's directories, and only
+// the caller knows which machine is this one.
+func (s *Screen) setDirectory(report string) {
+	u, err := url.Parse(report)
+	if err != nil || u.Scheme != "file" || !strings.HasPrefix(u.Path, "/") {
+		return
+	}
+	s.dirHost, s.dirPath = u.Host, u.Path
+}
+
+// Directory is where the shell last said it was working, and on which host,
+// or "", "" if it never said. Shells that report it do so at every prompt.
+func (s *Screen) Directory() (host, path string) { return s.dirHost, s.dirPath }
 
 // Title is the window title the program last asked for, or "" if it never did.
 func (s *Screen) Title() string { return s.title }

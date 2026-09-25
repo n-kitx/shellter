@@ -44,8 +44,11 @@ rather than rediscovering the state by reading the code.
 
 ## Keyboard input
 
-- [ ] `NSTextInputClient`: IME (Chinese/Japanese/Korean), dead keys
-      (Option+E, E -> é), emoji picker. `keyDown:` goes straight to Go today.
+- [x] `NSTextInputClient`: input methods (Chinese/Japanese/Korean), dead keys
+      (Option+E, E -> é), the emoji picker. The composition is drawn
+      underlined at the cursor. Ctrl/Cmd combinations and special keys skip
+      the input system while nothing is being composed. Press-and-hold is
+      off by default so held keys repeat.
 - [ ] Option-as-Meta setting. Option is left as macOS composes it (`ø`).
 - [ ] Application keypad mode (`ESC =`): keypad sends the same bytes either way.
 - [ ] Kitty keyboard protocol (Ctrl+I vs Tab, Shift+Enter vs Enter).
@@ -58,7 +61,10 @@ Only OSC 0 and 2 (title) are acted on: `screen.(*Screen).osc` in
 DCS payloads print as visible garbage.
 
 - [ ] DCS parsing (prerequisite for XTGETTCAP, tmux passthrough, sixel).
-- [ ] OSC 7 - current directory; new tabs and splits open where you are.
+- [x] OSC 7 - current directory; new tabs and splits open where you are.
+      zsh sends nothing by default, so the kernel's answer for the shell's
+      pid (`proc_pidinfo`, `shell.Session.Dir`) is the fallback; an OSC 7
+      report wins only when its host is this machine.
 - [ ] OSC 8 - hyperlinks.
 - [ ] OSC 52 - clipboard (copy from vim/tmux over SSH).
 - [ ] OSC 4 / 10 / 11 / 12 - palette and fg/bg/cursor colour query and set
@@ -78,7 +84,7 @@ DCS payloads print as visible garbage.
 
 - [ ] Search (Cmd+F).
 - [ ] Scrollbar / scroll-position indicator.
-- [ ] Clear scrollback.
+- [x] Clear scrollback (Cmd+K, see Mac app behaviour).
 - [ ] Auto-scroll when a selection drag reaches the edge.
 - [ ] Rectangular selection (Option+drag).
 - [ ] Copy on select (option).

@@ -183,9 +183,15 @@ func (g *GUI) openTab() (*tab, error) {
 	return tb, nil
 }
 
-// openPane starts one shell on a grid of the given size.
+// openPane starts one shell on a grid of the given size, in the directory the
+// focused pane is in - the first one, with nothing focused, where the
+// configuration says.
 func (g *GUI) openPane(rows, cols int) (*pane, error) {
-	return newPane(g.Config, rows, cols, g.ScrollbackLines)
+	cfg := g.Config
+	if dir := g.current().directory(); dir != "" {
+		cfg.Dir = dir
+	}
+	return newPane(cfg, rows, cols, g.ScrollbackLines)
 }
 
 // startPane gives a pane the goroutine that reads its PTY. One per pane,

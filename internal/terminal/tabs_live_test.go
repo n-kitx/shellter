@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +232,44 @@ func TestClosingABusyTabAsksFirst(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// A new tab opens where you are, not in your home directory: zsh says nothing
+// about where it is, so this is the kernel's answer doing the work.
+func TestNewTabOpensInTheCurrentDirectory(t *testing.T) {
+	g := newLiveGUI(t)
+	first, err := g.openTab()
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTab(t, first, "the first tab's prompt", func(s string) bool {
+		return strings.Contains(s, "PROMPT>")
+	})
+
+	want, _ := filepath.EvalSymlinks(t.TempDir())
+	if _, err := first.sole().sess.Write([]byte("cd " + want + "\r")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for first.sole().directory() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("the first tab never reached %s (at %q)", want, first.sole().directory())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	second, err := g.openTab()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.sole().sess.Write([]byte("pwd\r")); err != nil {
+		t.Fatal(err)
+	}
+	// A temporary directory's path is longer than the 80 columns, so pwd's
+	// answer wraps; the screen shows it as two lines of one.
+	waitForTab(t, second, "the new tab to print "+want, func(s string) bool {
+		return strings.Contains(strings.ReplaceAll(s, "\n", ""), want)
+	})
 }
 
 // A resize reaches the shells themselves, not just our grids: `tput cols` asks

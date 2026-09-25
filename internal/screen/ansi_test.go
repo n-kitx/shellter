@@ -276,3 +276,38 @@ func TestSnapshotCarriesAttributesAndModes(t *testing.T) {
 		t.Fatal("the snapshot was mutated")
 	}
 }
+
+// OSC 7 is how a shell says where it is. The path is a URL's, so it arrives
+// percent-encoded; the host is kept for the caller to judge.
+func TestOSC7RecordsTheDirectory(t *testing.T) {
+	s := New(3, 20)
+	if host, path := s.Directory(); host != "" || path != "" {
+		t.Fatalf("a fresh screen knows a directory: %q %q", host, path)
+	}
+
+	feed(s, "\x1b]7;file://my-mac.local/Users/me/My%20Project\x07")
+	if host, path := s.Directory(); host != "my-mac.local" || path != "/Users/me/My Project" {
+		t.Fatalf("Directory() = %q, %q", host, path)
+	}
+
+	// ST-terminated works as well as BEL, and an empty host is allowed.
+	feed(s, "\x1b]7;file:///tmp\x1b\\")
+	if host, path := s.Directory(); host != "" || path != "/tmp" {
+		t.Fatalf("Directory() = %q, %q", host, path)
+	}
+
+	// Anything that is not a file URL with an absolute path is ignored, and
+	// the last good report stands.
+	for _, bad := range []string{"http://x/y", "file://host", "not a url %zz"} {
+		feed(s, "\x1b]7;"+bad+"\x07")
+		if _, path := s.Directory(); path != "/tmp" {
+			t.Fatalf("%q replaced the directory with %q", bad, path)
+		}
+	}
+
+	// It survives a reset: clearing the screen does not move the shell.
+	feed(s, "\x1bc")
+	if _, path := s.Directory(); path != "/tmp" {
+		t.Fatalf("RIS lost the directory: %q", path)
+	}
+}

@@ -1,8 +1,11 @@
 package terminal
 
 import (
-	"github.com/thakurankit7/shellter/internal/parser"
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/thakurankit7/shellter/internal/parser"
 
 	"github.com/thakurankit7/shellter/internal/input"
 	"github.com/thakurankit7/shellter/internal/render"
@@ -286,6 +289,51 @@ func TestClearDropsTheSelection(t *testing.T) {
 	}
 	if n := g.screen().ScrollbackLen(); n != 0 {
 		t.Fatalf("%d lines of history survived Cmd+K", n)
+	}
+}
+
+// A shell's OSC 7 report is believed when it is about this machine and names a
+// directory that exists; a report from the far side of ssh is not.
+func TestPaneDirectoryPrefersALocalReport(t *testing.T) {
+	g := newTestGUI(5, 20)
+	p := g.current()
+	dir := t.TempDir()
+	host, _ := os.Hostname()
+
+	g.feed("\x1b]7;file://" + host + dir + "\x07")
+	if got := p.directory(); got != dir {
+		t.Fatalf("directory() = %q, want the reported %q", got, dir)
+	}
+
+	// Another machine's path: there is no kernel to fall back on in a test
+	// pane, so nothing is known.
+	g.feed("\x1b]7;file://build-server.example.com" + dir + "\x07")
+	if got := p.directory(); got != "" {
+		t.Fatalf("believed a remote directory: %q", got)
+	}
+
+	// A local path that does not exist here is no better.
+	g.feed("\x1b]7;file:///no/such/place\x07")
+	if got := p.directory(); got != "" {
+		t.Fatalf("believed a missing directory: %q", got)
+	}
+
+	var none *pane
+	if got := none.directory(); got != "" {
+		t.Fatalf("a nil pane has directory %q", got)
+	}
+}
+
+func TestIsLocalHost(t *testing.T) {
+	name, _ := os.Hostname()
+	short, _, _ := strings.Cut(name, ".")
+	for _, h := range []string{"", "localhost", name, short, short + ".local", strings.ToUpper(short)} {
+		if !isLocalHost(h) {
+			t.Fatalf("%q should be this machine (%q)", h, name)
+		}
+	}
+	if isLocalHost("build-server.example.com") {
+		t.Fatal("a different machine was taken for this one")
 	}
 }
 

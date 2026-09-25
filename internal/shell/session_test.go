@@ -2,6 +2,7 @@ package shell
 
 import (
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -159,4 +160,27 @@ func TestRunningNamesTheForegroundJob(t *testing.T) {
 	waitFor("sleep")
 	s.Write([]byte{0x03}) // Ctrl+C: back to the prompt
 	waitFor("")
+}
+
+// Dir follows the shell as it moves, without the shell having to say anything.
+func TestDirFollowsTheShell(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Args = []string{"-f", "-i"}
+	s, err := Start(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	defer s.Hangup()
+	go io.Copy(io.Discard, s)
+
+	want, _ := filepath.EvalSymlinks(t.TempDir())
+	s.Write([]byte("cd " + want + "\r"))
+	deadline := time.Now().Add(5 * time.Second)
+	for s.Dir() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("Dir() = %q, want %q", s.Dir(), want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
