@@ -116,3 +116,40 @@ func TestScrollbackClear(t *testing.T) {
 		t.Fatalf("Len = %d, want 0 after clear", sb.Len())
 	}
 }
+
+// Cmd+K: history and output go, the prompt the cursor is on stays - moved to
+// the top, with whatever was half-typed on it.
+func TestClearKeepsThePromptLine(t *testing.T) {
+	s := NewWithScrollback(3, 10, 50)
+	feed(s, "one\r\ntwo\r\nthree\r\nfour\r\n$ ls -")
+	if s.ScrollbackLen() == 0 {
+		t.Fatal("setup: expected history")
+	}
+
+	s.Clear()
+	if n := s.ScrollbackLen(); n != 0 {
+		t.Fatalf("%d lines of history survived", n)
+	}
+	assertLine(t, s, 0, "$ ls -")
+	assertLine(t, s, 1, "")
+	assertLine(t, s, 2, "")
+	assertCursor(t, s, 0, 6)
+
+	// Typing carries on where it was.
+	feed(s, "la")
+	assertLine(t, s, 0, "$ ls -la")
+}
+
+// In a full-screen program the screen is the program's: only history goes.
+func TestClearLeavesTheAltScreenAlone(t *testing.T) {
+	s := NewWithScrollback(3, 10, 50)
+	feed(s, "a\r\nb\r\nc\r\nd\r\n")
+	feed(s, "\x1b[?1049hvim\r\nhere")
+
+	s.Clear()
+	if s.ScrollbackLen() != 0 {
+		t.Fatal("history survived")
+	}
+	assertLine(t, s, 0, "vim")
+	assertLine(t, s, 1, "here")
+}

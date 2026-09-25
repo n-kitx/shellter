@@ -163,6 +163,76 @@ func TestClosingATabEndsItsShell(t *testing.T) {
 	t.Fatal("closing the tab did not end its shell")
 }
 
+// Closing a tab that is running something asks first, names what is running,
+// and leaves the tab alone when the answer is no. At a prompt it asks nothing.
+func TestClosingABusyTabAsksFirst(t *testing.T) {
+	g := newLiveGUI(t)
+	if _, err := g.openTab(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := g.openTab()
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTab(t, second, "the second tab's prompt", func(s string) bool {
+		return strings.Contains(s, "PROMPT>")
+	})
+
+	var asked []string
+	answer := false
+	g.confirm = func(message, detail, action string) bool {
+		asked = append(asked, message+" "+detail)
+		return answer
+	}
+
+	if _, err := second.sole().sess.Write([]byte("sleep 30\r")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for second.sole().running() != "sleep" {
+		if time.Now().After(deadline) {
+			t.Fatalf("the tab never reported sleep as running (got %q)", second.sole().running())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	g.closeTab(1)
+	if len(asked) != 1 || !strings.Contains(asked[0], "sleep is still running") {
+		t.Fatalf("asked %q, want one question naming sleep", asked)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if second.sole().running() != "sleep" {
+		t.Fatal("Cancel still stopped the job")
+	}
+
+	// Back at the prompt, the same close goes through without a question.
+	if _, err := second.sole().sess.Write([]byte{0x03}); err != nil {
+		t.Fatal(err)
+	}
+	for second.sole().running() != "" {
+		if time.Now().After(deadline) {
+			t.Fatal("Ctrl+C did not return the shell to its prompt")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	g.closeTab(1)
+	if len(asked) != 1 {
+		t.Fatalf("asked again at an idle prompt: %q", asked)
+	}
+	for {
+		g.mu.Lock()
+		n := len(g.tabs)
+		g.mu.Unlock()
+		if n == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the idle tab did not close")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // A resize reaches the shells themselves, not just our grids: `tput cols` asks
 // the kernel, which only knows what we told it.
 func TestResizeReachesEveryShell(t *testing.T) {

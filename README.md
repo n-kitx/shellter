@@ -751,6 +751,10 @@ see, so that switching to one never shows a grid of the wrong shape.
 | `Shift`+drag | select even while a program has asked for the mouse |
 | drag the sidebar's edge | make the tab sidebar wider or narrower (120–480 pt) |
 | double click the title strip | zoom or minimise, as System Settings says |
+| `Cmd+K` | clear: history goes, the prompt line moves to the top |
+| `Cmd+=` / `Cmd+-` / `Cmd+0` | bigger / smaller / configured font size |
+| `Cmd+,` | open the settings file (written with every key listed, if missing) |
+| `Cmd+H` / `Cmd+M` / `Ctrl+Cmd+F` | hide / minimise / full screen |
 
 All but `Cmd+1`…`Cmd+9` are menu items, because a shortcut nobody can find is
 not a feature. `Cmd+1`…`Cmd+9` are handled in `GUI.tabKey`, ahead of the encoder —
@@ -770,6 +774,21 @@ goroutine blocked forever and the tab stuck in the list. A shell that exits
 closes the last slave descriptor, and *that* is what makes the read return EIO.
 The group rather than the shell alone, because a shell running vim would
 otherwise leave vim attached to a PTY with nobody on the other end.
+
+### Asking before closing something that is running
+
+Before a pane, a tab, the window or the whole app is closed, Shellter asks the
+kernel which process group owns each terminal (`ioctl(TIOCGPGRP)` on the
+master, in `pty.Process.Foreground`). The shell was made a session leader, so
+at its prompt that group is the shell's own pid; anything else means a job is
+in the foreground, and `ps` names it. Only then is there a question — "vim is
+still running. Closing will stop it." — so the prompt that matters is not
+drowned out by one after every idle `exit`.
+
+The descriptor is borrowed through `SyscallConn`, not `Fd`: `Fd` switches the
+file back to blocking mode, and the pump's read on it has to stay
+interruptible. The alert is modal, and is shown with no lock held, so every
+pane keeps printing underneath it.
 
 So a tab disappears by exactly one route, whether you clicked its close button
 or typed `exit` into it: its shell ends, its read loop ends, and the read loop
@@ -1301,6 +1320,14 @@ resizes it into the ten sizes macOS asks for and packs them with `iconutil`.
 The bundle is signed ad-hoc, which is enough to give it a stable identity on
 this machine — not enough to get it past Gatekeeper on anyone else's.
 
+Launched from the Dock, Shellter inherits launchd's world rather than a
+shell's: the working directory is `/` and there is no locale. So the shell is
+started in `$HOME` whichever way Shellter was launched, and is given the
+environment a terminal owes it (`internal/shell/env.go`): `TERM=xterm-256color`,
+`COLORTERM=truecolor`, and — only if none of `LC_ALL`, `LC_CTYPE`, `LANG` is set —
+`LANG` from the language chosen in System Settings, so text is UTF-8 rather than
+the C locale's bytes.
+
 ```sh
 go test ./...
 ```
@@ -1333,37 +1360,11 @@ cat /tmp/screen.txt
 That file is the screen buffer's contents at the end of the session —
 reconstructed purely from events, never from the raw bytes.
 
-## Not implemented yet (on purpose)
+## Not implemented yet
 
-**Terminal features.** No left/right margins (`DECLRMM`), no double-width or
-double-height lines, no `DECRQM` mode queries, no sixel or image protocols, and
-no reflow of wrapped lines. Blink is recorded but never animated. The parser
-still recognises more than the screen acts on, and those events are skipped
-rather than mishandled.
-
-**Text.** Grapheme clusters are approximated as "base character plus combining
-marks", so emoji built from ZWJ sequences (a family, a flag) occupy one cell per
-component instead of being drawn as one glyph. Scrollback lines keep the width
-they were written at: there is no reflow when the window is resized.
-
-**Input.** Option is left as macOS composes it, so Option+o types `ø` rather
-than sending Meta — there is no "use Option as Meta" setting yet. The numeric
-keypad sends the same bytes whether or not a program asked for application
-keypad mode (`ESC =`), which is harmless but not correct. Typing with an input
-method does not work: the window reads keystrokes directly instead of
-implementing `NSTextInputClient`, so IME composition and dead keys are out.
-Paste is not wired up, though the bracketed-paste mode it would need is tracked.
-
-**UI.** No scrollbar or scroll-position indicator, and no search. Selection has
-no keyboard mode and does not auto-scroll when a drag reaches the edge of the
-window — you can select only what is on screen, then scroll and select again.
-There is no rectangular (block) selection, and no middle-click paste of a
-primary selection, which is an X11 convention rather than a macOS one. Splits
-cannot be resized by dragging their divider — a split is always down the middle — and there is no way
-to swap two panes or to turn one back into a tab. No dragging tabs to reorder
-them, and no way to move a tab to another window. No GPU rendering, and no font
-configuration: the font is Menlo at whatever `font-size` says, and a theme sets
-colours only.
+Every known gap - next to Terminal.app, iTerm2, Ghostty and the rest - is kept
+in [FEATURES.md](FEATURES.md), with where in the code each would go. That file
+is the one list; this README describes what exists.
 
 **Verification.** The GUI has never been looked at by a human in this project:
 every claim about it rests on the headless tests, the live tests against real
@@ -1374,21 +1375,3 @@ against the traffic lights is precisely the kind of thing only an eye can
 confirm — and it is how Phase 12 shipped a tab bar that said `shell 1` and a
 strip whose colour did not match the grid under it. Both were found by a person
 looking at a screenshot, and neither could have been found any other way.
-
-## Likely next phases
-
-1. Auto-scroll while dragging a selection past the edge of the window, and a
-   scrollbar or scroll-position indicator. Both are about the same thing: there
-   is no way to see or reach history while the mouse is busy.
-2. A chosen font family, next to `font-size` in the settings file. It is the
-   single largest remaining difference from the terminals this one is modelled
-   on, and reloading the settings file while running is the same problem as
-   reloading a theme.
-3. A scrollbar or scroll-position indicator, and draggable split dividers so a
-   pane can be given more than half.
-4. Real text input (`NSTextInputClient`) for input methods and dead keys, plus
-   Option-as-Meta.
-5. Reflow. Which line breaks were soft is now recorded, for copying; making
-   resize rewrap history instead of truncating it is the other half of the job.
-6. The screen is still the slowest link: 41 MB/s against a PTY that can deliver
-   193. The next profile would start at `Screen.print`.

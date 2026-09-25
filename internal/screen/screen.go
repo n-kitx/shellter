@@ -884,6 +884,27 @@ func (s *Screen) eraseDisplay(mode int) {
 	}
 }
 
+// Clear is Cmd+K: the history goes, and so does everything above the cursor's
+// row, which moves to the top. The shell is not told - it is waiting at a
+// prompt on that row, and keeping the row is what keeps the prompt, and
+// anything half-typed after it, without asking the shell to draw it again.
+//
+// A full-screen program owns what is on screen, so for vim or less only the
+// history behind it is dropped.
+func (s *Screen) Clear() {
+	s.sb.clear()
+	s.offset = 0
+	if s.altActive {
+		return
+	}
+	s.shiftUp(0, s.rows-1, s.cur.Row, false)
+	s.cur.Row = 0
+	for r := 1; r < s.rows; r++ {
+		s.blankRow(r)
+	}
+	s.pendingWrap = false
+}
+
 // eraseChars implements CSI X: blank n cells from the cursor without moving it
 // and without shifting anything along.
 func (s *Screen) eraseChars(n int) {

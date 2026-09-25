@@ -26,6 +26,10 @@ void shellterSetTitle(const char *title);
 // actually asked for motion (?1003). Safe to call from any thread.
 void shellterSetMouseTracking(int enabled);
 
+// shellterConfirm shows a modal alert with the action and Cancel, and returns 1
+// if the action was chosen. Main thread only.
+int shellterConfirm(const char *message, const char *detail, const char *action);
+
 // The clipboard. shellterClipboard returns a copy the caller must free, or
 // NULL when the pasteboard holds no text.
 void shellterSetClipboard(const char *text, int len);

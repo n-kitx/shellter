@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -157,5 +159,49 @@ func TestThemeNamesAreForgiving(t *testing.T) {
 	cfg := parse(t, "theme = Tokyo Night")
 	if cfg.Theme.Name != "tokyo-night" {
 		t.Errorf("got %q, want tokyo-night", cfg.Theme.Name)
+	}
+}
+
+// The file Settings... creates must be one the parser accepts as it stands,
+// and uncommenting any line must give a valid setting.
+func TestCreateWritesAParseableTemplate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "config")
+	if err := Create(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(strings.NewReader(string(data))); err != nil {
+		t.Fatalf("template does not parse: %v", err)
+	}
+	var uncommented strings.Builder
+	settings := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if key, _, ok := strings.Cut(strings.TrimPrefix(line, "# "), " = "); ok && !strings.Contains(key, " ") {
+			line = strings.TrimPrefix(line, "# ")
+			settings++
+		}
+		uncommented.WriteString(line + "\n")
+	}
+	cfg, err := Parse(strings.NewReader(uncommented.String()))
+	if err != nil {
+		t.Fatalf("an uncommented setting is invalid: %v", err)
+	}
+	if settings != 7 {
+		t.Fatalf("the template lists %d settings, want every one of the 7", settings)
+	}
+	if cfg != Default() {
+		t.Fatalf("the template's values are not the defaults: %+v", cfg)
+	}
+
+	// A file that is already there is left exactly as it was.
+	os.WriteFile(path, []byte("font-size = 20\n"), 0o644)
+	if err := Create(path); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "font-size = 20\n" {
+		t.Fatalf("Create overwrote the user's file: %q", got)
 	}
 }

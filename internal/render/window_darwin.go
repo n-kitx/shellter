@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 	"sync"
 	"unsafe"
@@ -147,6 +148,25 @@ func Clipboard() string {
 	}
 	defer C.free(unsafe.Pointer(p))
 	return C.GoString(p)
+}
+
+// Confirm asks a yes/no question in a modal alert: message is the question,
+// detail says why it is being asked, and action labels the button that goes
+// ahead (the other is Cancel). It returns true for the action.
+//
+// Main thread only, which is where every callback from the window arrives.
+func Confirm(message, detail, action string) bool {
+	m, d, a := C.CString(message), C.CString(detail), C.CString(action)
+	defer C.free(unsafe.Pointer(m))
+	defer C.free(unsafe.Pointer(d))
+	defer C.free(unsafe.Pointer(a))
+	return C.shellterConfirm(m, d, a) != 0
+}
+
+// OpenInEditor opens a text file in the user's default editor for text - the
+// app `open -t` picks, TextEdit unless they chose another.
+func OpenInEditor(path string) error {
+	return exec.Command("open", "-t", path).Run()
 }
 
 // SetMouseTracking turns plain motion reporting on and off. It is off unless a
@@ -414,6 +434,34 @@ func shellterGoPaste() {
 	if cfg := config(); cfg != nil && cfg.OnPaste != nil {
 		cfg.OnPaste()
 	}
+}
+
+// shellterGoClear reports Cmd+K or the Clear menu item.
+//
+//export shellterGoClear
+func shellterGoClear() {
+	if cfg := config(); cfg != nil && cfg.OnClear != nil {
+		cfg.OnClear()
+	}
+}
+
+// shellterGoSettings reports Settings... in the application menu.
+//
+//export shellterGoSettings
+func shellterGoSettings() {
+	if cfg := config(); cfg != nil && cfg.OnSettings != nil {
+		cfg.OnSettings()
+	}
+}
+
+// shellterGoCanQuit is asked before the window closes or the app quits.
+//
+//export shellterGoCanQuit
+func shellterGoCanQuit() C.int {
+	if cfg := config(); cfg != nil && cfg.CanQuit != nil && !cfg.CanQuit() {
+		return 0
+	}
+	return 1
 }
 
 // shellterGoSelectAll reports Cmd+A or the Select All menu item.

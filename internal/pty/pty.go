@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"unsafe"
 
 	creack "github.com/creack/pty"
 )
@@ -154,6 +155,34 @@ func (p *Process) Hangup() error {
 		return nil // already gone, which is the outcome we wanted
 	}
 	return err
+}
+
+// Foreground returns the process group the terminal is currently giving the
+// keyboard to - the job the shell started, or the shell itself when it is
+// sitting at a prompt. It is the same question `ps` answers with the "+" in its
+// STAT column, asked of the kernel directly.
+//
+// The descriptor is borrowed through SyscallConn rather than Fd, because Fd
+// puts the file back into blocking mode, and the pump's read on it must stay
+// interruptible.
+func (p *Process) Foreground() (int, error) {
+	conn, err := p.master.SyscallConn()
+	if err != nil {
+		return 0, fmt.Errorf("pty: foreground: %w", err)
+	}
+	var pgid int32
+	var ioctlErr syscall.Errno
+	err = conn.Control(func(fd uintptr) {
+		_, _, ioctlErr = syscall.Syscall(syscall.SYS_IOCTL, fd,
+			uintptr(syscall.TIOCGPGRP), uintptr(unsafe.Pointer(&pgid)))
+	})
+	if err != nil {
+		return 0, fmt.Errorf("pty: foreground: %w", err)
+	}
+	if ioctlErr != 0 {
+		return 0, fmt.Errorf("pty: foreground: %w", ioctlErr)
+	}
+	return int(pgid), nil
 }
 
 // Wait blocks until the child exits and returns its exit status. A non-zero

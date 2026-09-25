@@ -147,6 +147,17 @@ func (p *pane) write(b []byte) {
 	}
 }
 
+// running names what the shell in this pane is busy with, or "" when it is at
+// its prompt - or has already gone, or never existed, as in tests.
+func (p *pane) running() string {
+	p.io.Lock()
+	defer p.io.Unlock()
+	if p.sess == nil || p.gone {
+		return ""
+	}
+	return p.sess.Running()
+}
+
 // close ends the session. The shell is hung up on rather than having its PTY
 // pulled out from under it: the pump is blocked reading that PTY, and closing
 // it does not reliably wake the read, while a shell exiting does. The pump

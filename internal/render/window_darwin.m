@@ -18,6 +18,8 @@ static NSFont *gFont = nil;
 static NSFont *gFontBold = nil;
 static NSFont *gFontItalic = nil;
 static NSFont *gFontBoldItalic = nil;
+static double gFontSize = 0;     // the size the fonts above are at now
+static double gBaseFontSize = 0; // the configured size, which Cmd+0 returns to
 static double gCharWidth = 0;  // advance width of one cell
 static double gLineHeight = 0; // height of one row
 static NSView *gView = nil;      // the terminal grid
@@ -58,6 +60,8 @@ enum {
     kTabInset = 5,    // between a pill and the edge of the strip
     kTabRadius = 7,   // corner radius of a pill
     kNewTabSize = 30, // the "+" button
+    kFontMin = 6,     // how far Cmd+- and Cmd+= will go
+    kFontMax = 72,
 };
 
 static NSColor *rgba(int r, int g, int b, double a) {
@@ -369,6 +373,16 @@ void shellterSetClipboard(const char *text, int len) {
     NSPasteboard *pb = [NSPasteboard generalPasteboard];
     [pb clearContents];
     [pb writeObjects:@[s]];
+}
+
+int shellterConfirm(const char *message, const char *detail, const char *action) {
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    [alert setMessageText:[NSString stringWithUTF8String:message]];
+    [alert setInformativeText:[NSString stringWithUTF8String:detail]];
+    [alert addButtonWithTitle:[NSString stringWithUTF8String:action]];
+    [alert addButtonWithTitle:@"Cancel"];
+    [alert setAlertStyle:NSAlertStyleWarning];
+    return [alert runModal] == NSAlertFirstButtonReturn;
 }
 
 // shellterClipboard returns a copy the caller must free, or NULL when there is
@@ -887,6 +901,50 @@ static void titlebarDoubleClicked(NSWindow *window) {
 
 @end
 
+static BOOL gQuitAllowed = NO; // the user already agreed to end everything
+
+// setFontSize loads the four faces at a size and measures the cell they make.
+// The fonts are kept for the whole session, and replaced when Cmd+= or Cmd+-
+// changes the size, so they are retained here and the old ones released.
+static void setFontSize(double size) {
+    NSFont *regular = [NSFont fontWithName:@"Menlo" size:size];
+    if (regular == nil) {
+        regular = [NSFont userFixedPitchFontOfSize:size];
+    }
+    NSFontManager *fm = [NSFontManager sharedFontManager];
+    NSFont *bold = [fm convertFont:regular toHaveTrait:NSBoldFontMask];
+    NSFont *italic = [fm convertFont:regular toHaveTrait:NSItalicFontMask];
+    NSFont *boldItalic = [fm convertFont:bold toHaveTrait:NSItalicFontMask];
+
+    [gFont release];
+    [gFontBold release];
+    [gFontItalic release];
+    [gFontBoldItalic release];
+    gFont = [regular retain];
+    gFontBold = [bold retain];
+    gFontItalic = [italic retain];
+    gFontBoldItalic = [boldItalic retain];
+    gFontSize = size;
+
+    gCharWidth = [@"M" sizeWithAttributes:@{NSFontAttributeName : gFont}].width;
+    NSLayoutManager *layout = [[[NSLayoutManager alloc] init] autorelease];
+    gLineHeight = [layout defaultLineHeightForFont:gFont];
+}
+
+// zoomText changes the font size and keeps the window where it is: the grid
+// gains or loses rows and columns instead, the way Terminal.app does it. The
+// grid view re-reports its size in cells, which is how Go and every shell hear
+// about it.
+static void zoomText(double size) {
+    size = MAX(kFontMin, MIN(size, kFontMax));
+    if (size == gFontSize) {
+        return;
+    }
+    setFontSize(size);
+    [gView setFrameSize:[gView frame].size];
+    [gView setNeedsDisplay:YES];
+}
+
 // ---------------------------------------------------------------------------
 // Delegate
 // ---------------------------------------------------------------------------
@@ -967,6 +1025,42 @@ static void titlebarDoubleClicked(NSWindow *window) {
     shellterGoTabPosition(1);
 }
 
+- (void)clearBuffer:(id)sender {
+    shellterGoClear();
+}
+
+- (void)openSettings:(id)sender {
+    shellterGoSettings();
+}
+
+- (void)biggerText:(id)sender {
+    zoomText(gFontSize + 1);
+}
+
+- (void)smallerText:(id)sender {
+    zoomText(gFontSize - 1);
+}
+
+- (void)actualSizeText:(id)sender {
+    zoomText(gBaseFontSize);
+}
+
+// Closing the window and quitting both end every shell, so both ask Go first:
+// it knows whether anything is running, and asks the user if so. Closing the
+// window goes on to quit, and the answer already given is the answer to that
+// too - nobody wants to be asked twice.
+- (BOOL)windowShouldClose:(NSWindow *)sender {
+    gQuitAllowed = shellterGoCanQuit() != 0;
+    return gQuitAllowed;
+}
+
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
+    if (!gQuitAllowed) {
+        gQuitAllowed = shellterGoCanQuit() != 0;
+    }
+    return gQuitAllowed ? NSTerminateNow : NSTerminateCancel;
+}
+
 - (void)windowWillClose:(NSNotification *)notification {
     shellterGoClosed();
 }
@@ -1029,8 +1123,20 @@ static void installMenu(id target) {
 
     NSMenuItem *appItem = [[NSMenuItem alloc] init];
     [bar addItem:appItem];
+    // The application menu every Mac app has. A nil target sends the action
+    // down the responder chain to NSApp, which implements all but Settings.
+    NSEventModifierFlags cmd = NSEventModifierFlagCommand;
     NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"Shellter"];
-    [appMenu addItemWithTitle:@"Quit Shellter" action:@selector(terminate:) keyEquivalent:@"q"];
+    item(appMenu, @"About Shellter", @selector(orderFrontStandardAboutPanel:), @"", 0, nil);
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    item(appMenu, @"Settings\u2026", @selector(openSettings:), @",", cmd, target);
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    item(appMenu, @"Hide Shellter", @selector(hide:), @"h", cmd, nil);
+    item(appMenu, @"Hide Others", @selector(hideOtherApplications:), @"h",
+         cmd | NSEventModifierFlagOption, nil);
+    item(appMenu, @"Show All", @selector(unhideAllApplications:), @"", 0, nil);
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    item(appMenu, @"Quit Shellter", @selector(terminate:), @"q", cmd, nil);
     [appItem setSubmenu:appMenu];
 
     NSMenuItem *shellItem = [[NSMenuItem alloc] init];
@@ -1080,6 +1186,8 @@ static void installMenu(id target) {
     [editMenu addItem:[NSMenuItem separatorItem]];
     item(editMenu, @"Select All", @selector(selectAllText:), @"a",
          NSEventModifierFlagCommand, target);
+    [editMenu addItem:[NSMenuItem separatorItem]];
+    item(editMenu, @"Clear", @selector(clearBuffer:), @"k", cmd, target);
     [editItem setSubmenu:editMenu];
 
     NSMenuItem *viewItem = [[NSMenuItem alloc] init];
@@ -1090,7 +1198,27 @@ static void installMenu(id target) {
     gTopItem = item(whereMenu, @"Top", @selector(tabsOnTop:), @"", 0, target);
     gLeftItem = item(whereMenu, @"Left", @selector(tabsOnLeft:), @"", 0, target);
     [where setSubmenu:whereMenu];
+    [viewMenu addItem:[NSMenuItem separatorItem]];
+    item(viewMenu, @"Bigger", @selector(biggerText:), @"=", cmd, target);
+    item(viewMenu, @"Smaller", @selector(smallerText:), @"-", cmd, target);
+    item(viewMenu, @"Actual Size", @selector(actualSizeText:), @"0", cmd, target);
+    [viewMenu addItem:[NSMenuItem separatorItem]];
+    // AppKit retitles this "Exit Full Screen" by itself while it applies.
+    item(viewMenu, @"Enter Full Screen", @selector(toggleFullScreen:), @"f",
+         cmd | NSEventModifierFlagControl, nil);
     [viewItem setSubmenu:viewMenu];
+
+    // The Window menu. Handing it to NSApp is what makes AppKit list the
+    // window in it, and add the tiling items macOS offers on its own.
+    NSMenuItem *windowItem = [[NSMenuItem alloc] init];
+    [bar addItem:windowItem];
+    NSMenu *windowMenu = [[NSMenu alloc] initWithTitle:@"Window"];
+    item(windowMenu, @"Minimize", @selector(performMiniaturize:), @"m", cmd, nil);
+    item(windowMenu, @"Zoom", @selector(performZoom:), @"", 0, nil);
+    [windowMenu addItem:[NSMenuItem separatorItem]];
+    item(windowMenu, @"Bring All to Front", @selector(arrangeInFront:), @"", 0, nil);
+    [windowItem setSubmenu:windowMenu];
+    [NSApp setWindowsMenu:windowMenu];
 
     [NSApp setMainMenu:bar];
     syncTabPositionMenu();
@@ -1107,17 +1235,8 @@ void shellterRun(const char *title, int rows, int cols, double fontSize, double 
         // Dock icon, no keyboard focus. Terminals need both.
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
-        gFont = [NSFont fontWithName:@"Menlo" size:fontSize];
-        if (gFont == nil) {
-            gFont = [NSFont userFixedPitchFontOfSize:fontSize];
-        }
-        NSFontManager *fm = [NSFontManager sharedFontManager];
-        gFontBold = [fm convertFont:gFont toHaveTrait:NSBoldFontMask];
-        gFontItalic = [fm convertFont:gFont toHaveTrait:NSItalicFontMask];
-        gFontBoldItalic = [fm convertFont:gFontBold toHaveTrait:NSItalicFontMask];
-        gCharWidth = [@"M" sizeWithAttributes:@{NSFontAttributeName : gFont}].width;
-        NSLayoutManager *layout = [[NSLayoutManager alloc] init];
-        gLineHeight = [layout defaultLineHeightForFont:gFont];
+        gBaseFontSize = fontSize;
+        setFontSize(fontSize);
 
         // The window is sized for the grid plus its padding, and for the bar
         // if one is showing.

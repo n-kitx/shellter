@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thakurankit7/shellter/internal/pty"
 )
@@ -79,4 +80,83 @@ func TestCloseIsIdempotent(t *testing.T) {
 			t.Fatalf("close %d: %v", i+1, err)
 		}
 	}
+}
+
+// The shell's environment says what terminal it is in, whatever terminal (or
+// none) Shellter itself was started from.
+func TestEnvironment(t *testing.T) {
+	locale := func() string { return "en_IN.UTF-8" }
+	lookup := func(env []string, key string) (vals []string) {
+		for _, kv := range env {
+			if k, v, _ := strings.Cut(kv, "="); k == key {
+				vals = append(vals, v)
+			}
+		}
+		return vals
+	}
+
+	// Started from iTerm: its TERM is replaced, not joined by a second one.
+	env := environment([]string{"TERM=xterm-kitty", "HOME=/h", "TERM=screen"}, locale)
+	if got := lookup(env, "TERM"); len(got) != 1 || got[0] != "xterm-256color" {
+		t.Fatalf("TERM = %q", got)
+	}
+	if got := lookup(env, "COLORTERM"); len(got) != 1 || got[0] != "truecolor" {
+		t.Fatalf("COLORTERM = %q", got)
+	}
+	if got := lookup(env, "HOME"); len(got) != 1 || got[0] != "/h" {
+		t.Fatalf("HOME was disturbed: %q", got)
+	}
+
+	// Started from the Dock: no locale, so the system's is supplied.
+	if got := lookup(env, "LANG"); len(got) != 1 || got[0] != "en_IN.UTF-8" {
+		t.Fatalf("LANG = %q", got)
+	}
+
+	// A locale the user chose is theirs, whichever variable they chose it in.
+	if got := lookup(environment([]string{"LANG=fr_FR.UTF-8"}, locale), "LANG"); len(got) != 1 || got[0] != "fr_FR.UTF-8" {
+		t.Fatalf("the user's LANG became %q", got)
+	}
+	for _, kv := range []string{"LC_ALL=C", "LC_CTYPE=UTF-8"} {
+		if got := lookup(environment([]string{kv}, locale), "LANG"); len(got) != 0 {
+			t.Fatalf("with %s, LANG was added as %q", kv, got)
+		}
+	}
+}
+
+func TestSystemLocaleIsUTF8(t *testing.T) {
+	if got := systemLocale(); !strings.HasSuffix(got, ".UTF-8") {
+		t.Fatalf("systemLocale() = %q", got)
+	}
+}
+
+// A shell at its prompt is idle; one that has started a job is not, and says
+// which job.
+func TestRunningNamesTheForegroundJob(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Args = []string{"-f", "-i"} // interactive, so it does job control
+	s, err := Start(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	defer s.Hangup()
+	go io.Copy(io.Discard, s)
+
+	waitFor := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if s.Running() == want {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("Running() = %q, want %q", s.Running(), want)
+	}
+
+	waitFor("")
+	s.Write([]byte("sleep 30\r"))
+	waitFor("sleep")
+	s.Write([]byte{0x03}) // Ctrl+C: back to the prompt
+	waitFor("")
 }

@@ -94,6 +94,40 @@ func Load() (Config, error) {
 	return cfg, err
 }
 
+// Create writes a settings file at path listing every setting at its default,
+// commented out, unless a file is already there. It is what Settings... opens
+// the first time: a blank file teaches nothing, and one that names every key
+// and what it takes is most of the documentation.
+func Create(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		return nil // theirs, and not ours to touch
+	}
+	if err != nil {
+		return err
+	}
+	d := Default()
+	_, err = fmt.Fprintf(f, `# Shellter settings: "key = value", one per line. Remove the "#" to use one.
+# Changes apply the next time Shellter starts.
+
+# theme = %s    # %s
+# font-size = %g
+# tab-position = %s    # top or left
+# background-opacity = %g    # 0 to 1
+# background-blur = %t
+# window-padding = %d
+# scrollback = %d
+`, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontSize, d.TabPosition,
+		d.BackgroundOpacity, d.BackgroundBlur, d.WindowPadding, d.Scrollback)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 // Parse layers a settings file over Default.
 //
 // It reads the whole file even after a bad line, so one typo reports one error

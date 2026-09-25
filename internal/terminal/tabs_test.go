@@ -243,6 +243,52 @@ func TestTabPositionParsing(t *testing.T) {
 	}
 }
 
+// The question before closing names what would be stopped, in a sentence.
+func TestRunningDetail(t *testing.T) {
+	cases := []struct {
+		names []string
+		want  string
+	}{
+		{[]string{"vim"}, "vim is still running. Closing will stop it."},
+		{[]string{"vim", "npm"}, "vim and npm are still running. Closing will stop them."},
+		{[]string{"vim", "npm", "top", "ssh"}, "vim, npm and 2 others are still running. Closing will stop them."},
+	}
+	for _, c := range cases {
+		if got := runningDetail(c.names); got != c.want {
+			t.Fatalf("runningDetail(%q) = %q, want %q", c.names, got, c.want)
+		}
+	}
+}
+
+// Panes at a prompt close without a question: asking every time would teach
+// people to click through the one time it matters.
+func TestIdlePanesCloseWithoutAsking(t *testing.T) {
+	g := newTestGUI(5, 10)
+	g.confirm = func(string, string, string) bool {
+		t.Fatal("asked about panes with nothing running")
+		return false
+	}
+	if !g.canQuit() {
+		t.Fatal("quitting with nothing running was refused")
+	}
+	g.closeTab(0)
+	g.closePane()
+}
+
+// Cmd+K takes the selection with the history it pointed into.
+func TestClearDropsTheSelection(t *testing.T) {
+	g := newTestGUI(3, 10)
+	g.feed("a\r\nb\r\nc\r\nd\r\n$ ")
+	g.selectAll()
+	g.clear()
+	if g.current().sel.active {
+		t.Fatal("a selection survived the history it selected")
+	}
+	if n := g.screen().ScrollbackLen(); n != 0 {
+		t.Fatalf("%d lines of history survived Cmd+K", n)
+	}
+}
+
 // Drawing with no tabs left must not crash: the window can ask for a frame
 // between the last shell exiting and the event loop stopping.
 func TestFrameWithNoTabs(t *testing.T) {

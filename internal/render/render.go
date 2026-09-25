@@ -77,6 +77,17 @@ type Config struct {
 	OnCopy      func()
 	OnPaste     func()
 	OnSelectAll func()
+	// OnClear reports Cmd+K: clear the focused pane's screen and history.
+	OnClear func()
+
+	// --- the application ---
+
+	// OnSettings reports Settings... (Cmd+,).
+	OnSettings func()
+	// CanQuit is asked before the window closes or the app quits, and may say
+	// no - after asking the user, typically, when something is still running.
+	// Nil means yes.
+	CanQuit func() bool
 }
 
 // Mouse is one mouse event, in the same coordinates as the grid: zero-based,

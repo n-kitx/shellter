@@ -73,6 +73,7 @@ func run() (int, error) {
 		w.ScrollbackLines = cfg.Scrollback
 		w.TabPosition = position
 		w.FontSize = cfg.FontSize
+		w.ConfigPath = *path
 		w.Chrome = render.Chrome{
 			Opacity: cfg.BackgroundOpacity,
 			Blur:    cfg.BackgroundBlur,

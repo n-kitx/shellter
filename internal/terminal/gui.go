@@ -44,6 +44,9 @@ type GUI struct {
 	TabPosition render.TabPosition
 	// Chrome is how the window is dressed: padding, translucency, blur.
 	Chrome render.Chrome
+	// ConfigPath is the settings file Settings... opens: the one given with
+	// -config, or "" for the usual place.
+	ConfigPath string
 
 	// mu guards the tab list, which tab is active, and the shape of each tab's
 	// pane tree. A pane's *contents* are guarded by the pane itself, so a pane
@@ -75,6 +78,10 @@ type GUI struct {
 	// only, like the selection itself.
 	dragging     *pane
 	lastTracking screen.MouseTracking
+
+	// confirm, when set, answers the questions ask would put to the user.
+	// Tests set it; nothing else does.
+	confirm func(message, detail, action string) bool
 
 	// out, when set, replaces the active tab's PTY as the destination for
 	// encoded input. Tests set it; nothing else does.
@@ -136,6 +143,9 @@ func (g *GUI) Run() (int, error) {
 		OnCopy:        g.copySelection,
 		OnPaste:       g.paste,
 		OnSelectAll:   g.selectAll,
+		OnClear:       g.clear,
+		OnSettings:    g.openSettings,
+		CanQuit:       g.canQuit,
 	})
 
 	// The window is gone; make sure no shell outlives it.
@@ -252,9 +262,11 @@ func (g *GUI) focusPane(d render.Direction) {
 // closePane ends the focused pane's shell. Its pump then stops and forgetPane
 // takes it out of the tree - the same path a shell exiting on its own takes.
 func (g *GUI) closePane() {
-	if p := g.current(); p != nil {
-		p.close()
+	p := g.current()
+	if p == nil || !g.okToClose([]*pane{p}, "Close this pane?", "Close") {
+		return
 	}
+	p.close()
 }
 
 // closeTab closes every shell in a tab. Each pane's pump ends, and the last
@@ -267,6 +279,9 @@ func (g *GUI) closeTab(index int) {
 	}
 	g.mu.Unlock()
 
+	if !g.okToClose(panes, "Close this tab?", "Close") {
+		return
+	}
 	for _, p := range panes {
 		p.close()
 	}
@@ -882,13 +897,7 @@ func (g *GUI) updateTracking() {
 
 // closeWindow is called when the user closes the window: every shell hangs up.
 func (g *GUI) closeWindow() {
-	g.mu.Lock()
-	var panes []*pane
-	for _, tb := range g.tabs {
-		panes = append(panes, tb.panes()...)
-	}
-	g.mu.Unlock()
-	for _, p := range panes {
+	for _, p := range g.allPanes() {
 		p.close()
 	}
 }

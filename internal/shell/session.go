@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/thakurankit7/shellter/internal/pty"
 )
@@ -30,20 +33,23 @@ type Config struct {
 }
 
 // DefaultConfig returns the configuration Shellter uses today: an interactive
-// login zsh, inheriting our environment with TERM set.
+// login shell in the user's home directory, with an environment that says
+// what kind of terminal it is running in (see environment).
 //
-// TERM tells the shell and the programs it runs which escape sequences they
-// may emit. We do not interpret those sequences yet - in this phase the
-// terminal we are running inside does that for us.
+// The home directory is set rather than inherited because what we would
+// inherit depends on how we were started: the repository under `go run`, and
+// "/" from the Dock. A terminal opens where Terminal.app does.
 func DefaultConfig() Config {
 	shellPath := os.Getenv("SHELL")
 	if shellPath == "" {
 		shellPath = "/bin/zsh"
 	}
+	home, _ := os.UserHomeDir() // "" inherits ours, which is the best left
 	return Config{
 		Path: shellPath,
 		Args: []string{"-l"},
-		Env:  append(os.Environ(), "TERM=xterm-256color"),
+		Env:  environment(os.Environ(), systemLocale),
+		Dir:  home,
 		Size: pty.Size{Rows: 24, Cols: 80},
 	}
 }
@@ -87,6 +93,28 @@ func (s *Session) Pid() int { return s.proc.Pid() }
 
 // Wait blocks until the shell exits and returns its exit code.
 func (s *Session) Wait() (int, error) { return s.proc.Wait() }
+
+// Running names the program the shell is waiting on - "vim", "npm" - or
+// returns "" when the shell is at its prompt, which is what makes closing it
+// harmless.
+//
+// The shell was made a session leader, so its pid is its own process group; a
+// job it starts gets a group of its own and the terminal is handed to that. A
+// foreground group other than the shell's is therefore exactly "something else
+// is running".
+func (s *Session) Running() string {
+	fg, err := s.proc.Foreground()
+	if err != nil || fg <= 0 || fg == s.Pid() {
+		return ""
+	}
+	// The group is named after its leader, the program the user typed.
+	out, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(fg)).Output()
+	name := filepath.Base(strings.TrimSpace(string(out)))
+	if err != nil || name == "" || name == "." {
+		return "a program"
+	}
+	return name
+}
 
 // Hangup asks the shell and everything it is running to exit, the way closing
 // a terminal window does.
