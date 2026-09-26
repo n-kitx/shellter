@@ -27,6 +27,10 @@ const (
 	// EventOSC is an Operating System Command payload, e.g. a window title.
 	// Field: Data.
 	EventOSC
+	// EventDCS is a Device Control String: everything between "ESC P" and
+	// the string terminator, parameters and all, e.g. "+q544e" asking what
+	// the terminal's name is. Field: Data.
+	EventDCS
 )
 
 func (k Kind) String() string {
@@ -41,6 +45,8 @@ func (k Kind) String() string {
 		return "ESC"
 	case EventOSC:
 		return "OSC"
+	case EventDCS:
+		return "DCS"
 	default:
 		return fmt.Sprintf("Kind(%d)", int(k))
 	}
@@ -79,7 +85,7 @@ type Event struct {
 	// instruction for EventEscape.
 	Command byte
 
-	// Data is the OSC payload, e.g. "0;my window title".
+	// Data is the OSC or DCS payload, e.g. "0;my window title".
 	Data string
 }
 
@@ -126,6 +132,8 @@ func (e Event) String() string {
 		return fmt.Sprintf("ESC     cmd=%q", rune(e.Command))
 	case EventOSC:
 		return fmt.Sprintf("OSC     %q", e.Data)
+	case EventDCS:
+		return fmt.Sprintf("DCS     %q", e.Data)
 	default:
 		return fmt.Sprintf("UNKNOWN %+v", struct{ Kind Kind }{e.Kind})
 	}

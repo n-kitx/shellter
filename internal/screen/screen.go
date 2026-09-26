@@ -140,6 +140,10 @@ type Screen struct {
 	reflowEnds    []int
 	reflowScratch []Cell
 
+	// clipboard is text programs have asked to copy (OSC 52), waiting for the
+	// layer above to take it. See dcs.go.
+	clipboard []string
+
 	// replies are bytes owed to the program in answer to a query. The
 	// application layer drains them into the PTY; see reply.go.
 	replies []byte
@@ -502,6 +506,8 @@ func (s *Screen) Apply(e parser.Event) {
 		s.escape(e)
 	case parser.EventOSC:
 		s.osc(e.Data)
+	case parser.EventDCS:
+		s.dcs(e.Data)
 	}
 }
 
@@ -518,6 +524,8 @@ func (s *Screen) osc(data string) {
 		s.title = text
 	case "7":
 		s.setDirectory(text)
+	case "52":
+		s.setClipboard(text)
 	}
 }
 
@@ -766,9 +774,21 @@ func (s *Screen) csi(e parser.Event) {
 		s.saveCursor()
 	case 'u': // restore cursor
 		s.restoreCursor()
-	case 'q': // DECSCUSR when it carries the space intermediate
-		if len(e.Intermediates) == 1 && e.Intermediates[0] == ' ' {
-			s.setCursorStyle(e.Param(0, 0))
+	case 'q':
+		switch {
+		case len(e.Intermediates) == 1 && e.Intermediates[0] == ' ':
+			s.setCursorStyle(e.Param(0, 0)) // DECSCUSR
+		case e.Private == '>':
+			s.reply("\x1bP>|%s\x1b\\", Version) // XTVERSION: who is answering
+		}
+	case 'p': // DECRQM, when it carries the '$' intermediate
+		if len(e.Intermediates) == 1 && e.Intermediates[0] == '$' {
+			n := e.Param(0, 0)
+			if e.Private == '?' {
+				s.reply("\x1b[?%d;%d$y", n, s.modeState(n, true))
+			} else if e.Private == 0 {
+				s.reply("\x1b[%d;%d$y", n, s.modeState(n, false))
+			}
 		}
 
 	// --- queries: the program is asking, and expects an answer ---

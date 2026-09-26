@@ -47,6 +47,14 @@ type GUI struct {
 	// ConfigPath is the settings file Settings... opens: the one given with
 	// -config, or "" for the usual place.
 	ConfigPath string
+	// FontFamily is the terminal font; OptionAsMeta makes Option send Meta.
+	FontFamily   string
+	OptionAsMeta bool
+	// Reload reads the settings again, file and flags, for when the file
+	// changes; ThemesDir is where theme files live, so that editing one
+	// counts as a change too. Without Reload, settings are read once.
+	Reload    func() (Settings, error)
+	ThemesDir string
 
 	// mu guards the tab list, which tab is active, and the shape of each tab's
 	// pane tree. A pane's *contents* are guarded by the pane itself, so a pane
@@ -87,6 +95,11 @@ type GUI struct {
 
 	// resizing is the divider being dragged, or nil. UI thread only.
 	resizing *resizing
+	// hovered is the link under the pointer, and hoverRunes/hoverCols the
+	// scratch for reading the line it is on. UI thread only.
+	hovered    linkHover
+	hoverRunes []rune
+	hoverCols  []int
 
 	// out, when set, replaces the active tab's PTY as the destination for
 	// encoded input. Tests set it; nothing else does.
@@ -122,9 +135,15 @@ func (g *GUI) Run() (int, error) {
 	}
 	firstPane := first.focus
 
+	stop := make(chan struct{})
+	go g.watchSettings(stop)
+	defer close(stop)
+
 	runErr := render.Run(render.Config{
 		Title:         g.Title,
 		FontSize:      g.FontSize,
+		FontFamily:    g.FontFamily,
+		OptionAsMeta:  g.OptionAsMeta,
 		Rows:          g.rows,
 		Cols:          g.cols,
 		Chrome:        g.chrome(),
@@ -149,6 +168,8 @@ func (g *GUI) Run() (int, error) {
 		OnPaste:       g.paste,
 		OnSelectAll:   g.selectAll,
 		OnClear:       g.clear,
+		OnFind:        func(q string, dir int) { g.find(q, findDirection(dir)) },
+		OnHover:       g.hover,
 		OnTabRename:   g.renameTab,
 		OnTabMove:     g.moveTab,
 		OnSwapPane:    g.swapPane,
@@ -566,6 +587,14 @@ func (g *GUI) draw() render.Layout {
 	out.Panes, out.Dividers = g.paneOut[:0], g.dividerOut[:0]
 
 	for _, pl := range panes {
+		if f, held := pl.pane.heldFrame(); held {
+			out.Panes = append(out.Panes, render.Pane{
+				Rect:    render.Rect{Row: pl.rect.Row, Col: pl.rect.Col, Rows: pl.rect.Rows, Cols: pl.rect.Cols},
+				Frame:   f,
+				Focused: pl.pane == focus,
+			})
+			continue
+		}
 		pl.pane.mu.Lock()
 		snap := pl.pane.scr.SnapshotInto(pl.pane.snapCells)
 		pl.pane.mu.Unlock()
@@ -582,6 +611,8 @@ func (g *GUI) draw() render.Layout {
 
 		f := g.Palette.FrameInto(snap, pl.pane.frameCells, marked)
 		pl.pane.frameCells = f.Cells
+		g.markLink(pl.pane, f, snap.TopLine)
+		pl.pane.lastFrame = f
 
 		out.Panes = append(out.Panes, render.Pane{
 			Rect:    render.Rect{Row: pl.rect.Row, Col: pl.rect.Col, Rows: pl.rect.Rows, Cols: pl.rect.Cols},
@@ -629,6 +660,12 @@ func (g *GUI) titleFor(asked string) string {
 func (g *GUI) key(k input.Key) {
 	if g.tabKey(k) || g.scrollKey(k) {
 		return
+	}
+	// Typing moves text under a still pointer; the next move finds the link
+	// again, if there still is one.
+	if g.hovered.pane != nil {
+		g.hovered = linkHover{}
+		render.SetLinkHover(false, false)
 	}
 	b := g.encode(k)
 	if len(b) == 0 {
@@ -784,6 +821,12 @@ func (g *GUI) mouse(m render.Mouse) {
 	if m.Action == input.MousePress {
 		g.focusOn(p)
 	}
+	// Cmd+click opens a link. It comes before the program's claim on the
+	// mouse: Command is the Mac's, and never reaches a program anyway.
+	if m.Action == input.MousePress && m.Button == input.MouseLeft &&
+		m.Mods.Has(input.ModCommand) && g.openAt(p, local.Row, local.Col) {
+		return
+	}
 
 	p.mu.Lock()
 	mode := mouseMode(p.scr.Modes())
@@ -872,7 +915,7 @@ func (g *GUI) focus(focused bool) {
 // The mode comes from the screen: what an arrow key sends depends on whether
 // the program running inside asked for application cursor keys.
 func (g *GUI) encode(k input.Key) []byte {
-	mode := input.Mode{}
+	mode := input.Mode{OptionAsMeta: g.OptionAsMeta}
 	if t := g.current(); t != nil {
 		t.mu.Lock()
 		mode.ApplicationCursor = t.scr.ApplicationCursorKeys()

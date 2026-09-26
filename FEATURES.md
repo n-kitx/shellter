@@ -37,7 +37,8 @@ rather than rediscovering the state by reading the code.
 - [x] Confirm before closing a pane, tab, the window or the app while a job is
       running, naming it ("vim is still running"). Idle prompts close silently.
       `pty.Foreground` (TIOCGPGRP) vs the shell's pid, `shell.Session.Running`.
-- [ ] Remember window size and position, and the sidebar width.
+- [x] Remember window size and position (frame autosave), the sidebar width
+      and the zoom (NSUserDefaults). A zoom is dropped if font-size changes.
 - [ ] Session restore after quit.
 - [x] Double click on the title strip zooms / minimises per System Settings.
 - [x] Sidebar width is draggable (120-480 pt), not persisted.
@@ -49,7 +50,8 @@ rather than rediscovering the state by reading the code.
       underlined at the cursor. Ctrl/Cmd combinations and special keys skip
       the input system while nothing is being composed. Press-and-hold is
       off by default so held keys repeat.
-- [ ] Option-as-Meta setting. Option is left as macOS composes it (`ø`).
+- [x] Option-as-Meta setting (`option-as-meta = true`): ESC prefix for
+      letters, Return, Tab, Delete, Escape; arrows keep their parameter.
 - [ ] Application keypad mode (`ESC =`): keypad sends the same bytes either way.
 - [ ] Kitty keyboard protocol (Ctrl+I vs Tab, Shift+Enter vs Enter).
 - [ ] Secure Keyboard Entry (`EnableSecureEventInput`).
@@ -60,20 +62,22 @@ Only OSC 0 and 2 (title) are acted on: `screen.(*Screen).osc` in
 `screen/screen.go`. DCS is not a parser state at all (`parser/parser.go`), so
 DCS payloads print as visible garbage.
 
-- [ ] DCS parsing (prerequisite for XTGETTCAP, tmux passthrough, sixel).
+- [x] DCS parsing; APC/PM/SOS swallowed; 1 MB string limit that drops an
+      oversized string whole. XTGETTCAP and DECRQSS answered.
+- [ ] tmux passthrough (`DCS tmux; ... ST`) is dropped, not forwarded.
 - [x] OSC 7 - current directory; new tabs and splits open where you are.
       zsh sends nothing by default, so the kernel's answer for the shell's
       pid (`proc_pidinfo`, `shell.Session.Dir`) is the fallback; an OSC 7
       report wins only when its host is this machine.
 - [ ] OSC 8 - hyperlinks.
-- [ ] OSC 52 - clipboard (copy from vim/tmux over SSH).
+- [x] OSC 52 - clipboard writes; reads refused on purpose.
 - [ ] OSC 4 / 10 / 11 / 12 - palette and fg/bg/cursor colour query and set
       (nvim picks light/dark from this).
 - [ ] OSC 133 - shell integration: prompt marks, jump between prompts,
       select a command's output.
 - [ ] OSC 9 / 777 - desktop notifications.
-- [ ] Mode 2026 - synchronised output (stops TUI flicker).
-- [ ] `DECRQM` mode queries, `XTVERSION`.
+- [x] Mode 2026 - synchronised output, with a 500 ms safety timeout.
+- [x] `DECRQM` mode queries, `XTVERSION`.
 - [ ] `DECLRMM` left/right margins; double-width/height lines.
 - [ ] Sixel / kitty / iTerm image protocols.
 - [ ] BEL: sound or visual bell, Dock bounce, mark on a background tab. Ignored
@@ -82,14 +86,19 @@ DCS payloads print as visible garbage.
 
 ## Scrollback and selection
 
-- [ ] Search (Cmd+F).
+- [x] Search (Cmd+F, Cmd+G, Cmd+Shift+G, and ↑ ↓ × buttons in the bar):
+      whole history, case-insensitive, current match selected. Matches do not cross a row boundary; only the
+      current match is highlighted.
 - [ ] Scrollbar / scroll-position indicator.
 - [x] Clear scrollback (Cmd+K, see Mac app behaviour).
 - [ ] Auto-scroll when a selection drag reaches the edge.
 - [ ] Rectangular selection (Option+drag).
 - [ ] Copy on select (option).
 - [ ] Right-click menu (Copy, Paste, Clear, Split).
-- [ ] URL detection and Cmd+click to open URLs / paths.
+- [x] Cmd+click to open URLs and paths (relative to the pane's directory,
+      `:line:col` stripped); runnable files are revealed, not opened. Hover
+      underlines a link in blue with a tooltip; Cmd brightens it and shows
+      the hand pointer.
 - [ ] Drag a file onto the window to paste its path.
 - [x] Reflow on resize, history included (`screen/reflow.go`). Wide
       characters never straddle the edge. Alternate screen is cropped; the
@@ -118,7 +127,7 @@ DCS payloads print as visible garbage.
 
 ## Text and rendering
 
-- [ ] Font family setting (Menlo is hard-coded in `window_darwin.m`).
+- [x] Font family setting (`font-family`), falling back to Menlo.
 - [ ] Ligatures, line height, bold-as-bright.
 - [ ] Grapheme clusters: width is per rune plus combining marks, so ZWJ emoji
       and flags take one cell per component (`text/width.go`).
@@ -128,8 +137,9 @@ DCS payloads print as visible garbage.
 
 ## Configuration
 
-- [ ] Live reload of the settings file.
-- [ ] Settings for cursor style, Option-as-Meta, key bindings, font family.
+- [x] Live reload of the settings file and theme files (1 s poll).
+- [x] Custom themes: a file in `themes/` beside the settings file.
+- [ ] Settings for cursor style and key bindings.
 - [ ] Profiles; a Preferences window.
 
 ## Accessibility

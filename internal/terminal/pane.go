@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/thakurankit7/shellter/internal/parser"
 	"github.com/thakurankit7/shellter/internal/pty"
@@ -63,6 +64,13 @@ type pane struct {
 
 	snapCells  []screen.Cell
 	frameCells []render.Cell
+
+	// lastFrame is the frame this pane last drew, and syncSince when the
+	// program last started a synchronised update (?2026). While one is under
+	// way the pane goes on showing lastFrame, so a half-redrawn screen never
+	// reaches the glass. UI thread only.
+	lastFrame render.Frame
+	syncSince time.Time
 }
 
 // newPane starts a shell and gives it a screen of the given size.
@@ -89,11 +97,17 @@ func (p *pane) pump(r io.Reader, onChunk func()) {
 			p.mu.Lock()
 			ps.Parse(buf[:n], p.scr.Apply)
 			replies := p.scr.TakeReplies()
+			clips := p.scr.TakeClipboard()
 			p.mu.Unlock()
 
 			// A program that asked a question is blocked until it is answered.
 			if len(replies) > 0 {
 				p.write(replies)
+			}
+			// OSC 52: a program copying to the clipboard, from vim, from tmux,
+			// or from the far side of ssh.
+			for _, text := range clips {
+				render.SetClipboard(text)
 			}
 			onChunk()
 		}
@@ -208,6 +222,34 @@ func isLocalHost(host string) bool {
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// syncTimeout is how long a synchronised update may hold a pane's picture. A
+// program that starts one and crashes, or forgets to end it, must not leave
+// the pane frozen: after this long it is drawn anyway.
+const syncTimeout = 500 * time.Millisecond
+
+// heldFrame is the frame to show instead of a fresh one while the program is
+// part way through a synchronised update, and whether there is one. The frame
+// it returns is the last one drawn, which is a complete picture by
+// definition: it was drawn before the update began.
+func (p *pane) heldFrame() (render.Frame, bool) {
+	p.mu.Lock()
+	syncing := p.scr.Modes().SyncOutput
+	rows, cols := p.scr.Size()
+	p.mu.Unlock()
+
+	if !syncing {
+		p.syncSince = time.Time{}
+		return render.Frame{}, false
+	}
+	if p.syncSince.IsZero() {
+		p.syncSince = time.Now()
+	}
+	// A resize mid-update changes the grid's shape, and the old picture would
+	// no longer fit: draw the real thing.
+	held := p.lastFrame.Rows == rows && p.lastFrame.Cols == cols && p.lastFrame.Cells != nil
+	return p.lastFrame, held && time.Since(p.syncSince) < syncTimeout
 }
 
 // close ends the session. The shell is hung up on rather than having its PTY

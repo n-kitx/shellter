@@ -18,6 +18,7 @@ static NSFont *gFont = nil;
 static NSFont *gFontBold = nil;
 static NSFont *gFontItalic = nil;
 static NSFont *gFontBoldItalic = nil;
+static NSString *gFontName = @"Menlo"; // the family the setting asked for
 static double gFontSize = 0;     // the size the fonts above are at now
 static double gBaseFontSize = 0; // the configured size, which Cmd+0 returns to
 static double gCharWidth = 0;  // advance width of one cell
@@ -25,8 +26,20 @@ static double gLineHeight = 0; // height of one row
 static NSView *gView = nil;      // the terminal grid
 static NSView *gTabBar = nil;    // the chrome beside or above it
 static NSView *gContent = nil;   // the container holding both
+static NSView *gGlass = nil;     // frosts the desktop behind a translucent window
+static BOOL gBlur = NO;          // whether the setting asks for that
+static BOOL gOptionMeta = NO;    // Option+key goes to Go unmodified, as Meta
+static NSView *gFindBar = nil;   // the search bar, over the grid's top-right corner
+static NSSearchField *gFindField = nil;
+static NSTextField *gFindStatus = nil;
 static NSWindow *gWindow = nil;
 static NSTrackingArea *gTracking = nil;
+// gHoverArea follows the pointer over the grid all the time, for the
+// terminal's own hover effects. gTracking, above, exists only while a program
+// has asked for motion reports, and is what decides whether a move is reported
+// to the program.
+static NSTrackingArea *gHoverArea = nil;
+static BOOL gLinkHover = NO, gLinkCommand = NO;
 
 // Tab bar state. Pushed in from Go, read on the main thread only.
 static NSArray<NSString *> *gTabTitles = nil;
@@ -62,6 +75,8 @@ enum {
     kTabRadius = 7,   // corner radius of a pill
     kNewTabSize = 30, // the "+" button
     kFontMin = 6,     // how far Cmd+- and Cmd+= will go
+    kFindWidth = 380, // the search bar
+    kFindHeight = 34,
     kFontMax = 72,
 };
 
@@ -337,7 +352,11 @@ static BOOL isSpecialKey(NSEvent *event) {
 - (void)keyDown:(NSEvent *)event {
     unsigned int mods = modsFromEvent(event);
     BOOL command = (mods & ((1 << 1) | (1 << 3))) != 0; // Control or Command
-    if (![self hasMarkedText] && (command || (isSpecialKey(event) && [[event characters] length] > 0))) {
+    // With Option as Meta, Option is a modifier for Go to encode, not a way to
+    // compose a character, so the input system is kept out of it.
+    BOOL meta = gOptionMeta && (mods & (1 << 2)) != 0;
+    if (![self hasMarkedText] && (command || meta ||
+                                  (isSpecialKey(event) && [[event characters] length] > 0))) {
         [self sendKey:event];
         return;
     }
@@ -354,6 +373,11 @@ static BOOL isSpecialKey(NSEvent *event) {
     // Everything else - which bytes to send - is decided in Go.
     NSString *chars = [event characters];
     NSString *base = [event charactersIgnoringModifiers];
+    // Option as Meta sends the key as it would be without Option - Shift
+    // still counts, so Option+Shift+B is Meta+B, capital - and Go adds the ESC.
+    if (gOptionMeta && ([event modifierFlags] & NSEventModifierFlagOption)) {
+        chars = [event charactersByApplyingModifiers:([event modifierFlags] & NSEventModifierFlagShift)];
+    }
     if (chars == nil) {
         chars = @"";
     }
@@ -552,10 +576,50 @@ static NSString *plainString(id string) {
     [self reportMouse:event button:kMouseMiddle action:kMouseMove];
 }
 
-// Motion with no button held only arrives while a tracking area is installed,
-// which happens when a program asks for ?1003.
+// Motion with no button held goes to the program only while it has asked for
+// ?1003. The hover underneath - links - is the terminal's own, and always on.
 - (void)mouseMoved:(NSEvent *)event {
-    [self reportMouse:event button:kMouseNone action:kMouseMove];
+    if (gTracking != nil) {
+        [self reportMouse:event button:kMouseNone action:kMouseMove];
+    }
+    [self reportHover:event];
+}
+
+- (void)reportHover:(NSEvent *)event {
+    int row = 0, col = 0;
+    [self cellForEvent:event row:&row col:&col];
+    shellterGoHover(row, col, modsFromEvent(event));
+}
+
+- (void)mouseExited:(NSEvent *)event {
+    shellterGoHover(-1, -1, 0);
+}
+
+// Pressing or letting go of Command over a link changes what a click would
+// do, so it is reported as a hover at the same cell - no need to move.
+- (void)flagsChanged:(NSEvent *)event {
+    NSPoint p = [self convertPoint:[[self window] mouseLocationOutsideOfEventStream] fromView:nil];
+    if (NSPointInRect(p, [self bounds])) {
+        int row = (int)floor((p.y - gPad) / gLineHeight);
+        int col = (int)floor((p.x - gPad) / gCharWidth);
+        shellterGoHover(MAX(row, 0), MAX(col, 0), modsFromEvent(event));
+    }
+    [super flagsChanged:event];
+}
+
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (gHoverArea != nil) {
+        [self removeTrackingArea:gHoverArea];
+        [gHoverArea release];
+    }
+    gHoverArea = [[NSTrackingArea alloc]
+        initWithRect:[self bounds]
+             options:(NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
+                      NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect)
+               owner:self
+            userInfo:nil];
+    [self addTrackingArea:gHoverArea];
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +640,47 @@ void shellterSetClipboard(const char *text, int len) {
     NSPasteboard *pb = [NSPasteboard generalPasteboard];
     [pb clearContents];
     [pb writeObjects:@[s]];
+}
+
+void shellterSetFindStatus(const char *status) {
+    NSString *text = [NSString stringWithUTF8String:status];
+    void (^apply)(void) = ^{
+      [gFindStatus setStringValue:text != nil ? text : @""];
+    };
+    if ([NSThread isMainThread]) {
+        apply();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), apply);
+    }
+}
+
+void shellterSetOptionAsMeta(int on) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      gOptionMeta = on != 0;
+    });
+}
+
+void shellterPost(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      shellterGoRunPosted();
+    });
+}
+
+void shellterSetLinkHover(int link, int command) {
+    BOOL l = link != 0, c = command != 0;
+    if (gWindow == nil || (l == gLinkHover && c == gLinkCommand)) {
+        return;
+    }
+    gLinkHover = l;
+    gLinkCommand = c;
+    // The hand appears only when a click would open the link; without
+    // Command a click still selects text, and a hand would promise otherwise.
+    if (l && c) {
+        [[NSCursor pointingHandCursor] set];
+    } else {
+        [[NSCursor arrowCursor] set];
+    }
+    [gView setToolTip:l ? @"\u2318-click to open" : nil];
 }
 
 void shellterBeep(void) {
@@ -1056,6 +1161,7 @@ static void titlebarDoubleClicked(NSWindow *window) {
             [content layoutViews];
         }
     }
+    [[NSUserDefaults standardUserDefaults] setDouble:gTabBarWidth forKey:@"ShellterSidebarWidth"];
 }
 
 - (void)mouseDown:(NSEvent *)event {
@@ -1215,6 +1321,63 @@ static void titlebarDoubleClicked(NSWindow *window) {
 @end
 
 // ---------------------------------------------------------------------------
+// The search bar
+// ---------------------------------------------------------------------------
+
+// ShellterFindBar is the panel the search field sits in: a rounded pill in the
+// chrome's own colours, so it reads as part of the window rather than a
+// system sheet dropped over it.
+@interface ShellterFindBar : NSView
+@end
+
+@implementation ShellterFindBar
+
+- (void)drawRect:(NSRect)dirtyRect {
+    NSRect r = NSInsetRect([self bounds], 0.5, 0.5);
+    NSBezierPath *pill = [NSBezierPath bezierPathWithRoundedRect:r xRadius:8 yRadius:8];
+    [chromeActiveBG() setFill];
+    [pill fill];
+    [chromeEdge() setStroke];
+    [pill stroke];
+}
+
+@end
+
+// findQuery is what the search field holds, as Go receives it.
+static void sendFind(int dir) {
+    const char *q = [[gFindField stringValue] UTF8String];
+    if (q == NULL) {
+        q = "";
+    }
+    shellterGoFind((char *)q, (int)strlen(q), dir);
+}
+
+static BOOL findOpen(void) { return gFindBar != nil && ![gFindBar isHidden]; }
+
+// editingFind reports whether the keyboard is in the search field, so the
+// Edit menu acts on the field's text rather than the terminal's.
+static BOOL editingFind(void) {
+    id fr = [gWindow firstResponder];
+    return findOpen() && [fr isKindOfClass:[NSTextView class]] &&
+           [(NSTextView *)fr delegate] == (id)gFindField;
+}
+
+static void openFind(void) {
+    [gFindBar setHidden:NO];
+    [gWindow makeFirstResponder:gFindField];
+    [[gFindField currentEditor] selectAll:nil];
+    if ([[gFindField stringValue] length] > 0) {
+        sendFind(0);
+    }
+}
+
+static void closeFind(void) {
+    [gFindBar setHidden:YES];
+    [gFindStatus setStringValue:@""];
+    [gWindow makeFirstResponder:gView];
+}
+
+// ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
 
@@ -1305,6 +1468,11 @@ static void titlebarDoubleClicked(NSWindow *window) {
         [gTabBar setFrame:NSMakeRect(gLeadInset, 0, b.size.width - gLeadInset, top)];
         [gView setFrame:NSMakeRect(0, top, b.size.width, b.size.height - top)];
     }
+    // The search bar floats over the grid's top-right corner, wherever the
+    // grid is.
+    NSRect grid = [gView frame];
+    [gFindBar setFrame:NSMakeRect(NSMaxX(grid) - kFindWidth - 12, NSMinY(grid) + 8,
+                                  kFindWidth, kFindHeight)];
     [self setNeedsDisplay:YES];
 }
 
@@ -1321,7 +1489,12 @@ static BOOL gQuitAllowed = NO; // the user already agreed to end everything
 // The fonts are kept for the whole session, and replaced when Cmd+= or Cmd+-
 // changes the size, so they are retained here and the old ones released.
 static void setFontSize(double size) {
-    NSFont *regular = [NSFont fontWithName:@"Menlo" size:size];
+    // The family the settings name, if it is installed; Menlo if not, and
+    // the system's fixed-pitch font if even that is missing.
+    NSFont *regular = [NSFont fontWithName:gFontName size:size];
+    if (regular == nil) {
+        regular = [NSFont fontWithName:@"Menlo" size:size];
+    }
     if (regular == nil) {
         regular = [NSFont userFixedPitchFontOfSize:size];
     }
@@ -1357,13 +1530,51 @@ static void zoomText(double size) {
     setFontSize(size);
     [gView setFrameSize:[gView frame].size];
     [gView setNeedsDisplay:YES];
+
+    // Remembered with the size it was zoomed from, so that changing font-size
+    // in the settings file later wins over a zoom made against the old one.
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    [d setDouble:gFontSize forKey:@"ShellterFontSize"];
+    [d setDouble:gBaseFontSize forKey:@"ShellterFontBase"];
+}
+
+// restoredFontSize is the zoom the last session ended at, if it was made
+// against the same configured size; otherwise the configured size itself.
+static double restoredFontSize(double configured) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    double saved = [d doubleForKey:@"ShellterFontSize"];
+    if (saved >= kFontMin && saved <= kFontMax && [d doubleForKey:@"ShellterFontBase"] == configured) {
+        return saved;
+    }
+    return configured;
+}
+
+// dressWindow applies the chrome settings the window itself carries: whether
+// it is opaque, what it is filled with behind the views, whether the desktop
+// behind it is frosted, and whether AppKit draws its own parts - the traffic
+// lights, menus - light or dark.
+static void dressWindow(NSWindow *window) {
+    [window setAppearance:[NSAppearance appearanceNamed:
+        themeIsLight(gChromeRGB) ? NSAppearanceNameAqua : NSAppearanceNameDarkAqua]];
+    // Translucency has to be arranged in three places at once: the window
+    // must not claim to be opaque, its own backdrop must be clear, and the
+    // colours painted on top carry the alpha. Miss one and the desktop never
+    // shows through.
+    if (gOpacity < 1.0) {
+        [window setOpaque:NO];
+        [window setBackgroundColor:[NSColor clearColor]];
+    } else {
+        [window setOpaque:YES];
+        [window setBackgroundColor:chromeBG()];
+    }
+    [gGlass setHidden:!(gBlur && gOpacity < 1.0)];
 }
 
 // ---------------------------------------------------------------------------
 // Delegate
 // ---------------------------------------------------------------------------
 
-@interface ShellterDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
+@interface ShellterDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSSearchFieldDelegate>
 @end
 
 @implementation ShellterDelegate
@@ -1404,15 +1615,78 @@ static void zoomText(double size) {
 }
 
 - (void)copyText:(id)sender {
+    if (editingFind()) {
+        [(NSTextView *)[gWindow firstResponder] copy:nil];
+        return;
+    }
     shellterGoCopy();
 }
 
 - (void)pasteText:(id)sender {
+    if (editingFind()) {
+        [(NSTextView *)[gWindow firstResponder] paste:nil];
+        return;
+    }
     shellterGoPaste();
 }
 
 - (void)selectAllText:(id)sender {
+    if (editingFind()) {
+        [(NSTextView *)[gWindow firstResponder] selectAll:nil];
+        return;
+    }
     shellterGoSelectAll();
+}
+
+// Find, Find Next and Find Previous. The last two open the bar if it is not
+// already open, which is what Cmd+G does everywhere else on a Mac.
+- (void)showFind:(id)sender {
+    openFind();
+}
+
+- (void)findNext:(id)sender {
+    if (!findOpen()) {
+        openFind();
+        return;
+    }
+    sendFind(1);
+}
+
+- (void)hideFind:(id)sender {
+    closeFind();
+}
+
+- (void)findPrevious:(id)sender {
+    if (!findOpen()) {
+        openFind();
+        return;
+    }
+    sendFind(-1);
+}
+
+// Typing in the search field searches as you go, from the newest match.
+- (void)controlTextDidChange:(NSNotification *)note {
+    if ([note object] == gFindField) {
+        sendFind(0);
+    }
+}
+
+// Return steps to the next match up, Shift+Return back down, and Escape puts
+// the bar away and the keyboard back in the terminal.
+- (BOOL)control:(NSControl *)control textView:(NSTextView *)view doCommandBySelector:(SEL)command {
+    if (control != gFindField) {
+        return NO;
+    }
+    if (command == @selector(insertNewline:)) {
+        BOOL shift = ([[NSApp currentEvent] modifierFlags] & NSEventModifierFlagShift) != 0;
+        sendFind(shift ? -1 : 1);
+        return YES;
+    }
+    if (command == @selector(cancelOperation:)) {
+        closeFind();
+        return YES;
+    }
+    return NO;
 }
 
 - (void)focusLeft:(id)sender {
@@ -1646,6 +1920,11 @@ static void installMenu(id target) {
     item(editMenu, @"Select All", @selector(selectAllText:), @"a",
          NSEventModifierFlagCommand, target);
     [editMenu addItem:[NSMenuItem separatorItem]];
+    item(editMenu, @"Find\u2026", @selector(showFind:), @"f", cmd, target);
+    item(editMenu, @"Find Next", @selector(findNext:), @"g", cmd, target);
+    item(editMenu, @"Find Previous", @selector(findPrevious:), @"g",
+         cmd | NSEventModifierFlagShift, target);
+    [editMenu addItem:[NSMenuItem separatorItem]];
     item(editMenu, @"Clear", @selector(clearBuffer:), @"k", cmd, target);
     [editItem setSubmenu:editMenu];
 
@@ -1681,12 +1960,17 @@ static void installMenu(id target) {
     syncTabPositionMenu();
 }
 
-void shellterRun(const char *title, int rows, int cols, double fontSize, double padding,
-                 double opacity, int blur, unsigned int background) {
+void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
+                 double fontSize, double padding, double opacity, int blur,
+                 unsigned int background) {
     @autoreleasepool {
         gPad = padding;
         gOpacity = opacity;
         gChromeRGB = background;
+        gBlur = blur != 0;
+        if (fontFamily != NULL && *fontFamily != 0) {
+            gFontName = [[NSString stringWithUTF8String:fontFamily] retain];
+        }
         [NSApplication sharedApplication];
         // Keys go through the text input system now, and with press-and-hold
         // on, holding one down offers accented letters instead of repeating
@@ -1699,7 +1983,13 @@ void shellterRun(const char *title, int rows, int cols, double fontSize, double 
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
         gBaseFontSize = fontSize;
-        setFontSize(fontSize);
+        setFontSize(restoredFontSize(fontSize));
+
+        // The sidebar is as wide as it was last dragged to.
+        double width = [[NSUserDefaults standardUserDefaults] doubleForKey:@"ShellterSidebarWidth"];
+        if (width >= kTabBarMinWidth && width <= kTabBarMaxWidth) {
+            gTabBarWidth = width;
+        }
 
         // The window is sized for the grid plus its padding, and for the bar
         // if one is showing.
@@ -1727,22 +2017,6 @@ void shellterRun(const char *title, int rows, int cols, double fontSize, double 
         [window setTitlebarAppearsTransparent:YES];
         [window setTitleVisibility:NSWindowTitleHidden];
         [window setMovableByWindowBackground:YES];
-        // The traffic lights, the menu bar's idea of us and the blur behind a
-        // translucent window are AppKit's to draw, not ours, so the theme has
-        // to tell it which world we are in.
-        [window setAppearance:[NSAppearance appearanceNamed:
-            themeIsLight(gChromeRGB) ? NSAppearanceNameAqua : NSAppearanceNameDarkAqua]];
-
-        // Translucency has to be arranged in three places at once: the window
-        // must not claim to be opaque, its own backdrop must be clear, and the
-        // colours painted on top carry the alpha. Miss one and the desktop
-        // never shows through.
-        if (gOpacity < 1.0) {
-            [window setOpaque:NO];
-            [window setBackgroundColor:[NSColor clearColor]];
-        } else {
-            [window setBackgroundColor:chromeBG()];
-        }
 
         gStripHeight = NSHeight([window frame]) - NSHeight([window contentLayoutRect]);
         if (gStripHeight < 30) {
@@ -1757,7 +2031,10 @@ void shellterRun(const char *title, int rows, int cols, double fontSize, double 
         // of "tabs on top or on the left".
         ShellterContent *content = [[ShellterContent alloc] initWithFrame:frame];
         gContent = content;
-        if (blur && gOpacity < 1.0) {
+        {
+            // Always there, and shown only when the settings ask for blur
+            // behind a translucent window - so that turning either on while
+            // Shellter runs has something to show.
             NSVisualEffectView *glass = [[NSVisualEffectView alloc] initWithFrame:frame];
             [glass setMaterial:NSVisualEffectMaterialUnderWindowBackground];
             // Behind-window is what frosts the desktop rather than our own
@@ -1766,6 +2043,7 @@ void shellterRun(const char *title, int rows, int cols, double fontSize, double 
             [glass setState:NSVisualEffectStateActive];
             [glass setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
             [content addSubview:glass];
+            gGlass = glass;
         }
         ShellterTabBar *tabBar = [[ShellterTabBar alloc] initWithFrame:NSZeroRect];
         gTabBar = tabBar;
@@ -1773,16 +2051,61 @@ void shellterRun(const char *title, int rows, int cols, double fontSize, double 
         gView = view;
         [content addSubview:tabBar];
         [content addSubview:view];
+
+        ShellterFindBar *bar = [[ShellterFindBar alloc]
+            initWithFrame:NSMakeRect(0, 0, kFindWidth, kFindHeight)];
+        //  [ search field        ] 3 of 12  ^  v  x
+        NSSearchField *field = [[NSSearchField alloc]
+            initWithFrame:NSMakeRect(6, 5, kFindWidth - 176, 24)];
+        [field setPlaceholderString:@"Find"];
+        [[field cell] setSendsSearchStringImmediately:YES];
+        NSTextField *status = [NSTextField labelWithString:@""];
+        [status setFrame:NSMakeRect(kFindWidth - 166, 9, 70, 16)];
+        [status setAlignment:NSTextAlignmentRight];
+        [status setFont:[NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular]];
+        [status setTextColor:chromeDim()];
+        [bar addSubview:field];
+        [bar addSubview:status];
+        // The buttons do what the keys do - up is Return, towards older
+        // output; down is Shift+Return - and use the system's own symbols so
+        // they look like every other find bar on the Mac. A nil target sends
+        // the action down the responder chain to the delegate.
+        struct { NSString *symbol, *tip; SEL action; } buttons[] = {
+            {@"chevron.up", @"Older match (Return)", @selector(findNext:)},
+            {@"chevron.down", @"Newer match (Shift-Return)", @selector(findPrevious:)},
+            {@"xmark", @"Close (Esc)", @selector(hideFind:)},
+        };
+        for (int i = 0; i < 3; i++) {
+            NSImage *img = [NSImage imageWithSystemSymbolName:buttons[i].symbol
+                                     accessibilityDescription:buttons[i].tip];
+            NSButton *b = [NSButton buttonWithImage:img target:nil action:buttons[i].action];
+            [b setBordered:NO];
+            [b setContentTintColor:chromeText()];
+            [b setToolTip:buttons[i].tip];
+            [b setRefusesFirstResponder:YES];
+            [b setFrame:NSMakeRect(kFindWidth - 90 + i * 28, 5, 26, 24)];
+            [bar addSubview:b];
+        }
+        [bar setHidden:YES];
+        [content addSubview:bar];
+        gFindBar = bar;
+        gFindField = field;
+        gFindStatus = status;
         [window setContentView:content];
+        dressWindow(window);
         [content layoutViews];
         [window makeFirstResponder:view];
 
         ShellterDelegate *delegate = [[ShellterDelegate alloc] init];
         [window setDelegate:delegate];
         [NSApp setDelegate:delegate];
+        [gFindField setDelegate:delegate];
 
         installMenu(delegate);
         [window center];
+        // Where the window was and how big, the last time: AppKit saves the
+        // frame under this name whenever it changes, and restores it here.
+        [window setFrameAutosaveName:@"Shellter"];
         [window makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
 
@@ -2059,4 +2382,33 @@ void shellterDrawCursor(int row, int col, int width, const char *utf8, int len,
            NSFontAttributeName : gFont,
            NSForegroundColorAttributeName : colorFromRGB(bg),
        }];
+}
+
+// ---------------------------------------------------------------------------
+// Settings changed while running
+// ---------------------------------------------------------------------------
+
+void shellterSetFont(const char *family, double size) {
+    NSString *name = (family != NULL && *family != 0) ? [NSString stringWithUTF8String:family] : @"Menlo";
+    [gFontName release];
+    gFontName = [name retain];
+    gBaseFontSize = size;
+    setFontSize(size);
+    // Re-reporting the grid's size in cells is what tells Go, and every
+    // shell, that the same window now holds a different number of them.
+    [gView setFrameSize:[gView frame].size];
+    [gView setNeedsDisplay:YES];
+}
+
+void shellterSetChrome(double padding, double opacity, int blur, unsigned int background) {
+    gPad = padding;
+    gOpacity = opacity;
+    gBlur = blur != 0;
+    gChromeRGB = background;
+    dressWindow(gWindow);
+    [(ShellterContent *)gContent layoutViews];
+    [gView setFrameSize:[gView frame].size]; // padding changes the cell count
+    [gContent setNeedsDisplay:YES];
+    [gTabBar setNeedsDisplay:YES];
+    [gView setNeedsDisplay:YES];
 }

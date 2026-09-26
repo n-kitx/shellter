@@ -756,6 +756,8 @@ see, so that switching to one never shows a grid of the wrong shape.
 | drag the sidebar's edge | make the tab sidebar wider or narrower (120–480 pt) |
 | double click the title strip | zoom or minimise, as System Settings says |
 | `Cmd+K` | clear: history goes, the prompt line moves to the top |
+| `Cmd+F` / `Cmd+G` / `Cmd+Shift+G` | find / next (older) / previous (newer) |
+| `Cmd`+click | open the URL or file under the pointer |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | bigger / smaller / configured font size |
 | `Cmd+,` | open the settings file (written with every key listed, if missing) |
 | `Cmd+H` / `Cmd+M` / `Ctrl+Cmd+F` | hide / minimise / full screen |
@@ -826,6 +828,69 @@ The shell's own report wins only when it names this machine and a directory
 that exists here. Over ssh it describes the remote machine, where "open a tab
 in /srv/app" means nothing locally; the kernel's answer, the directory ssh was
 started from, is the right one then.
+
+### Finding text, and opening links
+
+**Cmd+F** opens a search bar over the top-right corner of the terminal. It
+searches everything the focused pane still holds - history and screen - as you
+type, ignoring case, and starts from the newest match, because the bottom of
+the pane is where you are. **Return** (or Cmd+G) steps to older matches,
+**Shift+Return** (or Cmd+Shift+G) to newer ones, both wrapping round, and the
+bar says "3 of 12". **Escape** closes it. The bar's ↑ and ↓ buttons do what
+Return and Shift+Return do, and × closes it; they use the system's own
+symbols, so the bar looks like every other find bar on the Mac.
+
+The match is shown by making it the selection, so there is nothing extra to
+draw and Cmd+C copies what was found. Matches are found again on every step
+rather than remembered, because output keeps arriving and a remembered list
+names lines that have since moved. A match does not cross a row boundary: a
+word the right edge broke in two is not found.
+
+**Cmd+click** opens what is under the pointer. A URL (`https://`, `www.`,
+`mailto:` ...) opens in the browser; a path - as `ls`, `git status` or a
+compiler prints one - is resolved against the directory the pane's shell is in
+and opens in whatever the Mac opens that kind of file with. `main.go:42:7` is
+`main.go`.
+
+Hovering over a link **underlines it in the theme's blue**, and a tooltip says
+"⌘-click to open"; holding Command brightens it and turns the pointer into a
+hand - only then, because only then does a click open it, and a plain click
+still selects text. Pointer movement is followed all the time for this, on a
+tracking area separate from the one a program asks for with `?1003`, so
+motion is still only ever *reported* to a program that wanted it. Only the
+token under the pointer is read, and the disk is asked about a path only when
+the pointer reaches a different token.
+
+A path to something that would *run* rather than open - an
+executable, a `.command` script, an app - is shown in the Finder instead: a
+click is not consent to execute, and the path on screen may have been printed
+by a program on the far side of ssh.
+
+### Strings, the clipboard, and synchronised output
+
+`ESC P` (DCS) is a parser state of its own, and APC, PM and SOS strings
+(`ESC _`, `ESC ^`, `ESC X`) are swallowed whole - kitty's image protocol is an
+APC, and a picture's worth of base64 is not text. Every string has a 1 MB
+limit, and one that exceeds it is **dropped whole rather than spilled** onto
+the screen, which is what the old 4 KB OSC limit used to do.
+
+Two DCS questions get honest answers: XTGETTCAP (`+q`, "what is capability
+X?") for the terminal's name and colour depth, and DECRQSS (`$q`, "what is
+setting X?") for the pen, the scroll region and the cursor shape. Everything
+else is refused rather than guessed at. `ESC [ > q` (XTVERSION) says
+"Shellter 0.1.0", and DECRQM (`ESC [ ? n $ p`) reports whether a mode is set -
+which is how nvim and tmux discover synchronised output before relying on it.
+
+**OSC 52** is how vim, tmux and anything over ssh put text on the clipboard.
+Writes go to the Mac's clipboard; **reads are refused**, because any program -
+including one on a server you do not control - could otherwise quietly collect
+whatever you last copied.
+
+**Synchronised output** (mode 2026) lets a program say "I am redrawing - do not
+show anything until I am done". While it is set, the pane goes on showing its
+last complete frame, so a half-painted screen never flickers past; after half a
+second the pane is drawn anyway, so a program that forgets to finish cannot
+freeze it.
 
 ### Asking before closing something that is running
 
@@ -1090,7 +1155,30 @@ window-padding = 12
 
 scrollback = 5000
 font-size = 14
+font-family = JetBrains Mono
+
+# Option sends Meta (Alt) - Option+B is back-a-word in zsh - instead of
+# typing the character macOS composes (Option+B is ∫)
+option-as-meta = true
 ```
+
+**Changes apply as soon as the file is saved** - no restart. Shellter checks
+the file, and every file in `themes/` beside it, once a second, re-reads it
+(flags still win, as they did at startup), and applies only what changed on
+the main thread. A file with a mistake in it leaves the running settings alone
+and says what is wrong. The check is a poll rather than a kernel watch on
+purpose: editors save by writing a new file and renaming it over the old one,
+which a watch on the old file never hears about.
+
+A few things are remembered rather than configured: the window's size and
+position, the zoom set with Cmd+= and Cmd+-, and how wide the tab sidebar was
+dragged. They live in macOS's own preferences for the app. A zoom is kept only
+while `font-size` in the file stays what it was when you zoomed: change the
+file, and the file wins.
+
+`font-family` is the name Font Book shows. One that is not installed falls
+back to Menlo rather than failing: fonts are the Mac's business, not the
+file's.
 
 Syntax is `key = value`, one per line, `#` starts a comment. A missing file is
 not an error — it is the normal case. An unknown key *is* an error, because a
@@ -1132,6 +1220,24 @@ about the *window*, and they stay in the config file where the other window
 settings are. Nothing stops a future theme from wanting a font; when that
 happens it will be a different decision, made on purpose, rather than one that
 crept in.
+
+**Your own theme** is a file in `themes/` beside the settings file, named
+after the theme. `theme = mocha` looks for a built-in `mocha`, and then for
+`~/.config/shellter/themes/mocha`:
+
+```text
+background = #1e1e2e
+foreground = #cdd6f4
+selection  = #45475a
+color0  = #45475a     # color0 to color15: the sixteen ANSI colours
+color1  = #f38ba8
+```
+
+Every key is optional - anything left out comes from the default theme - so a
+file can be as short as the two colours you care about. It is the settings
+file's syntax, because one syntax for everything a person edits is one fewer
+thing to learn. Saving the theme file re-themes the window like saving the
+settings does.
 
 Spelling is forgiven: `Tokyo Night`, `tokyo_night` and `tokyo-night` are the
 same theme. A name that does not exist is an error that **lists the ones that

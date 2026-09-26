@@ -75,11 +75,73 @@ func Run(cfg Config) error {
 		blur = 1
 	}
 
+	family := C.CString(cfg.FontFamily)
+	defer C.free(unsafe.Pointer(family))
+	SetOptionAsMeta(cfg.OptionAsMeta)
+
 	// Blocks in [NSApp run] until shellterStop is called.
-	C.shellterRun(title, C.int(cfg.Rows), C.int(cfg.Cols), C.double(cfg.FontSize),
+	C.shellterRun(title, C.int(cfg.Rows), C.int(cfg.Cols), family, C.double(cfg.FontSize),
 		C.double(cfg.Chrome.Padding), C.double(cfg.Chrome.Opacity), blur,
 		C.uint(cfg.Chrome.Background))
 	return nil
+}
+
+// SetFont changes the terminal font while the window is open: the family, and
+// the size Cmd+0 goes back to. The window keeps its size and the grid gains or
+// loses cells. Main thread only - see Post.
+func SetFont(family string, size float64) {
+	f := C.CString(family)
+	defer C.free(unsafe.Pointer(f))
+	C.shellterSetFont(f, C.double(size))
+}
+
+// SetChrome changes how the window is dressed while it is open: padding,
+// translucency, blur and the colour the chrome is drawn in. Main thread only.
+func SetChrome(c Chrome) {
+	var blur C.int
+	if c.Blur {
+		blur = 1
+	}
+	C.shellterSetChrome(C.double(c.Padding), C.double(c.Opacity), blur, C.uint(c.Background))
+}
+
+// SetOptionAsMeta says whether Option+key is handed over unmodified. Safe from
+// any goroutine.
+func SetOptionAsMeta(on bool) {
+	var v C.int
+	if on {
+		v = 1
+	}
+	C.shellterSetOptionAsMeta(v)
+}
+
+// posted is work waiting to be run on the main thread.
+var (
+	postMu sync.Mutex
+	posted []func()
+)
+
+// Post runs f on the main thread, soon. It is how a goroutine - one watching
+// the settings file, say - changes anything the window owns: AppKit may only
+// be touched from the thread it runs on.
+func Post(f func()) {
+	postMu.Lock()
+	posted = append(posted, f)
+	postMu.Unlock()
+	C.shellterPost()
+}
+
+// shellterGoRunPosted runs what Post queued. Called on the main thread.
+//
+//export shellterGoRunPosted
+func shellterGoRunPosted() {
+	postMu.Lock()
+	work := posted
+	posted = nil
+	postMu.Unlock()
+	for _, f := range work {
+		f()
+	}
 }
 
 // Redraw asks the window to repaint. Safe from any goroutine.
@@ -192,6 +254,39 @@ func Prompt(message, detail, initial string) (string, bool) {
 	}
 	defer C.free(unsafe.Pointer(out))
 	return C.GoString(out), true
+}
+
+// SetLinkHover tells the window the pointer is over a link, and whether
+// Command is held - which is when a click opens it, and so when the pointer
+// becomes a hand. Main thread only.
+func SetLinkHover(link, command bool) {
+	var l, c C.int
+	if link {
+		l = 1
+	}
+	if command {
+		c = 1
+	}
+	C.shellterSetLinkHover(l, c)
+}
+
+// SetFindStatus shows how a search went - "3 of 12", "no matches" - next to
+// the search field. Safe from any goroutine.
+func SetFindStatus(status string) {
+	c := C.CString(status)
+	defer C.free(unsafe.Pointer(c))
+	C.shellterSetFindStatus(c)
+}
+
+// Open hands a URL or a file to the Mac, which opens it in whatever is set up
+// to open it: a link in the browser, main.go in the editor.
+func Open(target string) error {
+	return exec.Command("open", target).Run()
+}
+
+// Reveal shows a file selected in a Finder window, without opening it.
+func Reveal(path string) error {
+	return exec.Command("open", "-R", path).Run()
 }
 
 // OpenInEditor opens a text file in the user's default editor for text - the
@@ -498,6 +593,25 @@ func shellterGoSwapPane(dir C.int) {
 func shellterGoPaneToTab() {
 	if cfg := config(); cfg != nil && cfg.OnPaneToTab != nil {
 		cfg.OnPaneToTab()
+	}
+}
+
+// shellterGoHover reports the pointer over a cell of the grid.
+//
+//export shellterGoHover
+func shellterGoHover(row, col C.int, mods C.uint) {
+	if cfg := config(); cfg != nil && cfg.OnHover != nil {
+		cfg.OnHover(int(row), int(col), input.Modifiers(mods))
+	}
+}
+
+// shellterGoFind reports the search field: a new query, or Find Next or
+// Previous.
+//
+//export shellterGoFind
+func shellterGoFind(query *C.char, n C.int, dir C.int) {
+	if cfg := config(); cfg != nil && cfg.OnFind != nil {
+		cfg.OnFind(C.GoStringN(query, n), int(dir))
 	}
 }
 

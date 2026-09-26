@@ -48,6 +48,18 @@ type Config struct {
 	Scrollback int
 	// FontSize is the terminal font's size in points.
 	FontSize float64
+	// FontFamily is the terminal font, by the name Font Book shows. A name
+	// that is not installed falls back to Menlo when the window opens, rather
+	// than failing here: fonts are the Mac's business, not the file's.
+	FontFamily string
+	// OptionAsMeta makes Option act as Meta (Alt) for the shell - Option+B is
+	// "back a word" in zsh - instead of typing the character macOS gives it
+	// (Option+B is "∫").
+	OptionAsMeta bool
+
+	// themesDir is where theme files are looked for: "themes" beside the
+	// settings file.
+	themesDir string
 }
 
 // Default is the configuration used when there is no file at all.
@@ -60,8 +72,21 @@ func Default() Config {
 		WindowPadding:     12,
 		Scrollback:        screen.DefaultScrollback,
 		FontSize:          14,
+		FontFamily:        "Menlo",
+		themesDir:         themesBeside(Path()),
 	}
 }
+
+// themesBeside is the themes directory for a settings file at path.
+func themesBeside(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(path), "themes")
+}
+
+// ThemesDir is where this configuration looks for theme files.
+func (c Config) ThemesDir() string { return c.themesDir }
 
 // Path is where Shellter looks for the file: $XDG_CONFIG_HOME/shellter/config,
 // or ~/.config/shellter/config when that is unset.
@@ -111,16 +136,18 @@ func Create(path string) error {
 	}
 	d := Default()
 	_, err = fmt.Fprintf(f, `# Shellter settings: "key = value", one per line. Remove the "#" to use one.
-# Changes apply the next time Shellter starts.
+# Changes apply as soon as the file is saved.
 
-# theme = %s    # %s
+# theme = %s    # %s, or a file in themes/
+# font-family = %s
 # font-size = %g
+# option-as-meta = %t    # Option types Meta (Alt) for the shell, not accents
 # tab-position = %s    # top or left
 # background-opacity = %g    # 0 to 1
 # background-blur = %t
 # window-padding = %d
 # scrollback = %d
-`, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontSize, d.TabPosition,
+`, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontFamily, d.FontSize, d.OptionAsMeta, d.TabPosition,
 		d.BackgroundOpacity, d.BackgroundBlur, d.WindowPadding, d.Scrollback)
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -133,7 +160,12 @@ func Create(path string) error {
 // It reads the whole file even after a bad line, so one typo reports one error
 // rather than hiding the next twenty.
 func Parse(r io.Reader) (Config, error) {
+	return parseIn(r, themesBeside(Path()))
+}
+
+func parseIn(r io.Reader, themesDir string) (Config, error) {
 	cfg := Default()
+	cfg.themesDir = themesDir
 	var problems []string
 
 	sc := bufio.NewScanner(r)
@@ -172,12 +204,22 @@ func Parse(r io.Reader) (Config, error) {
 func (c *Config) Set(key, value string) error {
 	switch key {
 	case "theme":
-		t, ok := theme.Get(value)
-		if !ok {
-			return fmt.Errorf("unknown theme %q; the built-in ones are %s",
-				value, strings.Join(theme.Names(), ", "))
+		t, err := c.findTheme(value)
+		if err != nil {
+			return err
 		}
 		c.Theme = t
+	case "font-family":
+		if value == "" {
+			return errors.New("font-family needs a font name, such as Menlo")
+		}
+		c.FontFamily = strings.Trim(value, `"`)
+	case "option-as-meta":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("option-as-meta: %w", err)
+		}
+		c.OptionAsMeta = b
 	case "tab-position":
 		if value != "top" && value != "left" {
 			return fmt.Errorf("tab-position must be top or left, not %q", value)
@@ -219,6 +261,31 @@ func (c *Config) Set(key, value string) error {
 	return nil
 }
 
+// findTheme looks a theme up by name: a built-in one first, then a file of
+// that name in the themes directory.
+func (c Config) findTheme(name string) (theme.Theme, error) {
+	if t, ok := theme.Get(name); ok {
+		return t, nil
+	}
+	if c.themesDir != "" && !strings.ContainsAny(name, `/\`) {
+		f, err := os.Open(filepath.Join(c.themesDir, name))
+		if err == nil {
+			defer f.Close()
+			t, err := theme.Parse(name, f)
+			if err != nil {
+				return t, fmt.Errorf("theme %q: %w", name, err)
+			}
+			return t, nil
+		}
+	}
+	where := ""
+	if c.themesDir != "" {
+		where = ", and there is no file of that name in " + c.themesDir
+	}
+	return theme.Theme{}, fmt.Errorf("unknown theme %q; the built-in ones are %s%s",
+		name, strings.Join(theme.Names(), ", "), where)
+}
+
 // stripComment removes a trailing "# ..." unless the "#" is quoted. No setting
 // needs a quoted "#" today; the check is here so adding one later does not
 // quietly break.
@@ -254,7 +321,7 @@ func LoadFrom(path string) (Config, error) {
 	}
 	defer f.Close()
 
-	cfg, err := Parse(f)
+	cfg, err := parseIn(f, themesBeside(path))
 	if err != nil {
 		return cfg, fmt.Errorf("%s: %w", path, err)
 	}

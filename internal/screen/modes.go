@@ -47,6 +47,10 @@ type Modes struct {
 	// whether it wants them in the extended encoding.
 	Mouse    MouseTracking
 	MouseSGR bool
+	// SyncOutput is ?2026, synchronised output: the program is part way
+	// through redrawing and asks not to be shown until it has finished, so a
+	// half-painted screen never flickers past.
+	SyncOutput bool
 }
 
 // MouseTracking is how much of the mouse a program has asked to see. Each level
@@ -136,7 +140,60 @@ func (s *Screen) setPrivateMode(p int, set bool) {
 
 	case 2004: // bracketed paste
 		s.mode.BracketedPaste = set
+	case 2026: // synchronised output
+		s.mode.SyncOutput = set
 	}
+}
+
+// modeState answers DECRQM, "ESC [ ? n $ p": is mode n set? It is how a
+// program finds out, before relying on a mode, that the terminal has it at
+// all - nvim and tmux ask about 2026 this way. 1 is set, 2 is reset, 0 is
+// "not a mode I know".
+func (s *Screen) modeState(p int, private bool) int {
+	on := func(b bool) int {
+		if b {
+			return 1
+		}
+		return 2
+	}
+	if !private {
+		switch p {
+		case 4:
+			return on(s.mode.Insert)
+		case 20:
+			return on(s.mode.NewLine)
+		}
+		return 0
+	}
+	switch p {
+	case 1:
+		return on(s.mode.ApplicationCursor)
+	case 6:
+		return on(s.mode.Origin)
+	case 7:
+		return on(s.mode.AutoWrap)
+	case 12:
+		return on(s.mode.CursorBlink)
+	case 25:
+		return on(s.mode.CursorVisible)
+	case 1000:
+		return on(s.mode.Mouse == MouseClick)
+	case 1002:
+		return on(s.mode.Mouse == MouseDrag)
+	case 1003:
+		return on(s.mode.Mouse == MouseMotion)
+	case 1004:
+		return on(s.mode.ReportFocus)
+	case 1006:
+		return on(s.mode.MouseSGR)
+	case 47, 1047, 1049:
+		return on(s.altActive)
+	case 2004:
+		return on(s.mode.BracketedPaste)
+	case 2026:
+		return on(s.mode.SyncOutput)
+	}
+	return 0
 }
 
 // setANSIMode handles the unprefixed modes. There are only two worth having.

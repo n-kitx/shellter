@@ -183,3 +183,29 @@ func (s *Screen) LineRunes(n int64, dst []rune) []rune {
 	}
 	return dst
 }
+
+// LineChars reads absolute line n as the characters on it and the column each
+// one starts in, trailing blanks dropped. It is the shape a search wants: one
+// entry per character - a wide one is not doubled the way LineRunes doubles
+// it - and a column to turn a match back into cells.
+//
+// The slices passed in are reused when they are long enough.
+func (s *Screen) LineChars(n int64, runes []rune, cols []int) ([]rune, []int) {
+	runes, cols = runes[:0], cols[:0]
+	buf := make([]Cell, s.cols)
+	if _, ok := s.lineAt(n, buf); !ok {
+		return runes, cols
+	}
+	end := len(buf)
+	for end > 0 && buf[end-1].Rune == ' ' && buf[end-1].Comb == "" {
+		end--
+	}
+	for i := 0; i < end; i++ {
+		if buf[i].IsContinuation() {
+			continue
+		}
+		runes = append(runes, buf[i].Rune)
+		cols = append(cols, i)
+	}
+	return runes, cols
+}

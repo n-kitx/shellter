@@ -9,8 +9,22 @@
 // the loop is stopped. padding is the gap in points between the window edge and
 // the text, opacity how solid the window is, and blur whether to frost what
 // shows through a translucent one.
-void shellterRun(const char *title, int rows, int cols, double fontSize, double padding,
-                 double opacity, int blur, unsigned int background);
+void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
+                 double fontSize, double padding, double opacity, int blur,
+                 unsigned int background);
+
+// shellterSetFont and shellterSetChrome change the font and the window's dress
+// while it is open. Main thread only.
+void shellterSetFont(const char *family, double size);
+void shellterSetChrome(double padding, double opacity, int blur, unsigned int background);
+
+// shellterSetOptionAsMeta says whether Option+key is passed on unmodified, as
+// Meta. Safe to call from any thread.
+void shellterSetOptionAsMeta(int on);
+
+// shellterPost asks the main thread to run what Go has queued with Post. Safe
+// to call from any thread.
+void shellterPost(void);
 
 // shellterRedraw marks the view dirty. Safe to call from any thread.
 void shellterRedraw(void);
@@ -41,6 +55,14 @@ int shellterConfirm(const char *message, const char *detail, const char *action)
 // returns what was typed as a copy the caller must free, or NULL on Cancel.
 // Main thread only.
 char *shellterPrompt(const char *message, const char *detail, const char *initial);
+
+// shellterSetLinkHover sets the pointer and tooltip for a link under it.
+// Main thread only.
+void shellterSetLinkHover(int link, int command);
+
+// shellterSetFindStatus shows a search's result beside the search field.
+// Safe to call from any thread.
+void shellterSetFindStatus(const char *status);
 
 // The clipboard. shellterClipboard returns a copy the caller must free, or
 // NULL when the pasteboard holds no text.

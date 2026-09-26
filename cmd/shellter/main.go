@@ -52,32 +52,51 @@ func run() (int, error) {
 	flag.Int("window-padding", d.WindowPadding, "gap in points between the window edge and the text")
 	flag.Int("scrollback", d.Scrollback, "lines of history to keep (0 disables)")
 	flag.Float64("font-size", d.FontSize, "terminal font size in points")
+	flag.String("font-family", d.FontFamily, "terminal font, by the name Font Book shows")
+	flag.Bool("option-as-meta", d.OptionAsMeta, "Option sends Meta (Alt) instead of typing accents")
 	flag.Parse()
 
-	cfg, err := settings(*path)
+	// load reads the settings - file, then flags - into the form the window
+	// uses. It runs once now, and again each time the file is saved.
+	load := func() (terminal.Settings, config.Config, error) {
+		cfg, err := settings(*path)
+		if err != nil {
+			return terminal.Settings{}, cfg, err
+		}
+		// Checked here rather than in package config, which must not depend
+		// on the renderer. Everything else config accepted is in range.
+		position, ok := render.ParseTabPosition(cfg.TabPosition)
+		if !ok {
+			return terminal.Settings{}, cfg, fmt.Errorf("tab-position must be top or left, not %q", cfg.TabPosition)
+		}
+		return terminal.Settings{
+			Palette:         terminal.PaletteFor(cfg.Theme),
+			FontFamily:      cfg.FontFamily,
+			FontSize:        cfg.FontSize,
+			TabPosition:     position,
+			ScrollbackLines: cfg.Scrollback,
+			OptionAsMeta:    cfg.OptionAsMeta,
+			Chrome: render.Chrome{
+				Opacity: cfg.BackgroundOpacity,
+				Blur:    cfg.BackgroundBlur,
+				Padding: cfg.WindowPadding,
+			},
+		}, cfg, nil
+	}
+	s, cfg, err := load()
 	if err != nil {
 		return -1, err
-	}
-
-	// Checked here rather than in package config, which must not depend on the
-	// renderer. Everything else config accepted is already in range.
-	position, ok := render.ParseTabPosition(cfg.TabPosition)
-	if !ok {
-		return -1, fmt.Errorf("tab-position must be top or left, not %q", cfg.TabPosition)
 	}
 
 	runner := terminal.New().Run
 	if *gui {
 		w := terminal.NewGUI()
-		w.Palette = terminal.PaletteFor(cfg.Theme)
-		w.ScrollbackLines = cfg.Scrollback
-		w.TabPosition = position
-		w.FontSize = cfg.FontSize
+		w.Use(s)
 		w.ConfigPath = *path
-		w.Chrome = render.Chrome{
-			Opacity: cfg.BackgroundOpacity,
-			Blur:    cfg.BackgroundBlur,
-			Padding: cfg.WindowPadding,
+		w.ThemesDir = cfg.ThemesDir()
+		w.Reload = func() (terminal.Settings, error) {
+			s, _, err := load()
+			return s, err
 		}
 		runner = w.Run
 	}

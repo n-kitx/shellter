@@ -205,3 +205,29 @@ func TestPagingAndHomeEndKeys(t *testing.T) {
 		})
 	}
 }
+
+// With Option as Meta, Option+key is ESC then the key - letters, Delete,
+// Return - while arrows keep their modifier parameter. Without it, Option
+// types what macOS composed.
+func TestOptionAsMeta(t *testing.T) {
+	meta := Mode{OptionAsMeta: true}
+	cases := []struct {
+		key  Key
+		want string
+	}{
+		{Key{Chars: []rune{'b'}, Base: 'b', Mods: ModOption}, "\x1bb"},
+		{Key{Chars: []rune{'B'}, Base: 'b', Mods: ModOption | ModShift}, "\x1bB"},
+		{Key{Code: CodeBackspace, Base: 0x7f, Mods: ModOption}, "\x1b\x7f"},
+		{Key{Code: CodeReturn, Base: 0x0d, Mods: ModOption}, "\x1b\r"},
+		{Key{Chars: []rune{'c'}, Base: 'c', Mods: ModOption | ModControl}, "\x1b\x03"},
+		{Key{Code: CodeLeft, Mods: ModOption}, "\x1b[1;3D"},
+	}
+	for _, c := range cases {
+		if got := string(Encode(c.key, meta)); got != c.want {
+			t.Errorf("Encode(%+v) = %q, want %q", c.key, got, c.want)
+		}
+	}
+	if got := string(Encode(Key{Chars: []rune{'∫'}, Base: 'b', Mods: ModOption}, Mode{})); got != "∫" {
+		t.Errorf("without Option as Meta, Option+B = %q, want the composed ∫", got)
+	}
+}

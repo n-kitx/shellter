@@ -14,8 +14,9 @@ import (
 //	     ▲       final byte    │      final byte
 //	     │                     │ ']'
 //	     │                 ┌───▼───┐
-//	     └───── BEL/ST ────│  OSC  │
-//	                       └───────┘
+//	     └───── BEL/ST ────│  OSC  │   and likewise, on ST, for the other
+//	                       └───────┘   strings: DCS (ESC P), and APC, PM and
+//	                                   SOS (ESC _ ^ X), which are swallowed
 type State int
 
 const (
@@ -30,6 +31,13 @@ const (
 	// StateOSC: we saw "ESC ]" and are collecting a string payload until it is
 	// terminated.
 	StateOSC
+	// StateDCS: we saw "ESC P" and are collecting a device control string.
+	StateDCS
+	// StateIgnore: we saw "ESC _", "ESC ^" or "ESC X" - an APC, PM or SOS
+	// string - and are discarding it up to its terminator. Nothing here acts
+	// on them, but printing them would be worse: kitty's image protocol is an
+	// APC, and a picture's worth of base64 is not text.
+	StateIgnore
 )
 
 func (s State) String() string {
@@ -42,6 +50,10 @@ func (s State) String() string {
 		return "CSI"
 	case StateOSC:
 		return "OSC"
+	case StateDCS:
+		return "DCS"
+	case StateIgnore:
+		return "Ignore"
 	default:
 		return fmt.Sprintf("State(%d)", int(s))
 	}
@@ -60,7 +72,10 @@ const (
 const (
 	maxParams   = 16
 	maxParamVal = 65535
-	maxOSCLen   = 4096
+	// maxStringLen bounds an OSC or DCS payload. Large, because OSC 52 carries
+	// a whole clipboard in base64; a string longer than this is swallowed
+	// whole and dropped, never printed.
+	maxStringLen = 1 << 20
 )
 
 // Parser is the byte-stream state machine. It is NOT safe for concurrent use;
@@ -79,9 +94,10 @@ type Parser struct {
 	paramPending  bool // have we seen digits or ';' for the current parameter?
 	intermediates []byte
 
-	// OSC accumulators.
-	osc    []byte
-	oscESC bool // last byte was ESC, so a '\' now would terminate the string
+	// String accumulators, shared by OSC and DCS.
+	osc      []byte
+	oscESC   bool // last byte was ESC, so a '\' now would terminate the string
+	overflow bool // the string outgrew maxStringLen: swallow it, emit nothing
 
 	// Partial UTF-8 sequence carried across Parse calls.
 	utf8 []byte
@@ -105,6 +121,7 @@ func (p *Parser) Reset() {
 	p.resetSequence()
 	p.osc = p.osc[:0]
 	p.oscESC = false
+	p.overflow = false
 	p.utf8 = p.utf8[:0]
 }
 
@@ -124,7 +141,7 @@ func (p *Parser) Parse(data []byte, emit func(Event)) {
 			p.escape(b, emit)
 		case StateCSI:
 			p.csi(b, emit)
-		case StateOSC:
+		case StateOSC, StateDCS, StateIgnore:
 			p.oscString(b, emit)
 		}
 	}
@@ -190,9 +207,11 @@ func (p *Parser) escape(b byte, emit func(Event)) {
 	case b == '[':
 		p.state = StateCSI
 	case b == ']':
-		p.state = StateOSC
-		p.osc = p.osc[:0]
-		p.oscESC = false
+		p.startString(StateOSC)
+	case b == 'P':
+		p.startString(StateDCS)
+	case b == '_' || b == '^' || b == 'X':
+		p.startString(StateIgnore)
 	case b == esc:
 		// A fresh ESC restarts the sequence.
 		p.resetSequence()
@@ -263,8 +282,10 @@ func (p *Parser) csi(b byte, emit func(Event)) {
 	}
 }
 
-// oscString: collect the payload until BEL or ST (ESC \) terminates it.
-// zsh and oh-my-zsh use these constantly to set the window title.
+// oscString: collect a string's payload until it is terminated. zsh and
+// oh-my-zsh send OSC strings constantly to set the window title. ST (ESC \)
+// ends any string; BEL ends only an OSC, which is xterm's rule - inside a DCS
+// it is just a byte.
 func (p *Parser) oscString(b byte, emit func(Event)) {
 	if p.oscESC {
 		p.oscESC = false
@@ -280,29 +301,49 @@ func (p *Parser) oscString(b byte, emit func(Event)) {
 	}
 
 	switch {
-	case b == bel:
+	case b == bel && p.state == StateOSC:
 		p.emitOSC(emit)
 	case b == esc:
 		p.oscESC = true
 	case b == can || b == sub:
 		p.osc = p.osc[:0]
+		p.overflow = false
 		p.toGround()
-	case len(p.osc) >= maxOSCLen:
-		// Runaway string: drop it rather than grow without bound.
+	case p.overflow || p.state == StateIgnore:
+		// Swallowed: an ignored string, or one too long to keep. Either way
+		// it runs to its terminator rather than spilling out as text.
+	case len(p.osc) >= maxStringLen:
 		p.osc = p.osc[:0]
-		p.toGround()
+		p.overflow = true
 	default:
 		p.osc = append(p.osc, b)
 	}
+}
+
+// startString begins collecting an OSC, DCS or ignored string.
+func (p *Parser) startString(s State) {
+	p.state = s
+	p.osc = p.osc[:0]
+	p.oscESC = false
+	p.overflow = false
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+// emitOSC ends a string, emitting it unless it was ignored or overflowed.
 func (p *Parser) emitOSC(emit func(Event)) {
-	emit(Event{Kind: EventOSC, Data: string(p.osc)})
+	if !p.overflow {
+		switch p.state {
+		case StateOSC:
+			emit(Event{Kind: EventOSC, Data: string(p.osc)})
+		case StateDCS:
+			emit(Event{Kind: EventDCS, Data: string(p.osc)})
+		}
+	}
 	p.osc = p.osc[:0]
+	p.overflow = false
 	p.toGround()
 }
 

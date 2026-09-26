@@ -11,7 +11,14 @@
 // opacity. Those are settings about the window; a theme is only about colour.
 package theme
 
-import "strings"
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+)
 
 // A Theme is a complete set of terminal colours.
 //
@@ -174,4 +181,77 @@ var all = []Theme{
 			0x7aa2f7, 0xbb9af7, 0x7dcfff, 0xc0caf5,
 		},
 	},
+}
+
+// Parse reads a theme file: "key = value" lines, "#" comments, colours as
+// "#rrggbb". The keys are background, foreground, selection and color0 to
+// color15; anything left out comes from the default theme, so a file can be as
+// short as the two colours someone cares about.
+//
+// It is the only way to have colours that are not built in. The format is the
+// settings file's on purpose: one syntax for everything a user edits.
+func Parse(name string, r io.Reader) (Theme, error) {
+	t := Default()
+	t.Name = normalize(name)
+	sc := bufio.NewScanner(r)
+	var problems []string
+	for n := 1; sc.Scan(); n++ {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			problems = append(problems, fmt.Sprintf("line %d: %q is not \"key = value\"", n, line))
+			continue
+		}
+		// A colour is one word, and it may itself start with "#", so a
+		// trailing comment is whatever follows that word.
+		key = strings.ToLower(strings.TrimSpace(key))
+		if fields := strings.Fields(value); len(fields) > 0 {
+			value = fields[0]
+		}
+		rgb, err := parseColor(value)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("line %d: %s: %v", n, key, err))
+			continue
+		}
+		switch {
+		case key == "background":
+			t.Background = rgb
+		case key == "foreground":
+			t.Foreground = rgb
+		case key == "selection":
+			t.Selection = rgb
+		case strings.HasPrefix(key, "color"):
+			i, err := strconv.Atoi(strings.TrimPrefix(key, "color"))
+			if err != nil || i < 0 || i > 15 {
+				problems = append(problems, fmt.Sprintf("line %d: %q is not color0 to color15", n, key))
+				continue
+			}
+			t.ANSI[i] = rgb
+		default:
+			problems = append(problems, fmt.Sprintf("line %d: unknown key %q", n, key))
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return t, err
+	}
+	if len(problems) > 0 {
+		return t, errors.New(strings.Join(problems, "\n"))
+	}
+	return t, nil
+}
+
+// parseColor reads "#rrggbb", "rrggbb" or "0xrrggbb".
+func parseColor(s string) (uint32, error) {
+	hex := strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(s), "#"), "0x")
+	if len(hex) != 6 {
+		return 0, fmt.Errorf("%q is not a colour like #1e1e2e", s)
+	}
+	v, err := strconv.ParseUint(hex, 16, 32)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a colour like #1e1e2e", s)
+	}
+	return uint32(v), nil
 }

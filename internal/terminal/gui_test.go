@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"testing"
+	"time"
 
 	"github.com/thakurankit7/shellter/internal/input"
 	"github.com/thakurankit7/shellter/internal/parser"
@@ -274,5 +275,38 @@ func TestATabIsRenamedWhenItsShellSaysWhereItIs(t *testing.T) {
 	}
 	if tb.shown != "me@host:/Users/me/PERSONAL/Flux" {
 		t.Fatalf("the bar was not told: shown is %q", tb.shown)
+	}
+}
+
+// While a program is part way through a synchronised update (?2026), the pane
+// shows the last complete picture; when the update ends, the new one appears.
+func TestSynchronisedOutputHoldsTheFrame(t *testing.T) {
+	g := newTestGUI(3, 10)
+	g.feed("before")
+	if got := frameLine(g.frame(), 0); got != "before    " {
+		t.Fatalf("setup: row 0 = %q", got)
+	}
+
+	g.feed("\x1b[?2026h\x1b[H\x1b[2Jhalf")
+	if got := frameLine(g.frame(), 0); got != "before    " {
+		t.Fatalf("mid-update the pane showed %q, want the old picture held", got)
+	}
+
+	g.feed("way\x1b[?2026l")
+	if got := frameLine(g.frame(), 0); got != "halfway   " {
+		t.Fatalf("after the update row 0 = %q, want the finished picture", got)
+	}
+}
+
+// A program that never ends its update does not freeze the pane.
+func TestSynchronisedOutputTimesOut(t *testing.T) {
+	g := newTestGUI(3, 10)
+	g.feed("before")
+	g.frame()
+	g.feed("\x1b[?2026hafter")
+	g.frame() // starts the clock
+	g.current().syncSince = time.Now().Add(-time.Second)
+	if got := frameLine(g.frame(), 0); got != "beforeafte" {
+		t.Fatalf("after the timeout row 0 = %q, want the live screen", got)
 	}
 }

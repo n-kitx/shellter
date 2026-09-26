@@ -2,6 +2,7 @@ package parser
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -321,5 +322,36 @@ func TestEventCloneCopiesItsSlices(t *testing.T) {
 
 	if len(kept.Params) != 1 || kept.Params[0] != 31 {
 		t.Fatalf("kept event = %v, want the clone unaffected by later parsing", kept.Params)
+	}
+}
+
+// A DCS runs to ST and arrives as one event; BEL inside it is only a byte.
+func TestDCSString(t *testing.T) {
+	got := New().ParseAll([]byte("a\x1bP+q544e\x1b\\b"))
+	if len(got) != 3 || got[1].Kind != EventDCS || got[1].Data != "+q544e" {
+		t.Fatalf("got %v, want a, DCS \"+q544e\", b", got)
+	}
+	got = New().ParseAll([]byte("\x1bPx\x07y\x1b\\"))
+	if len(got) != 1 || got[0].Data != "x\x07y" {
+		t.Fatalf("BEL ended a DCS: %v", got)
+	}
+}
+
+// APC, PM and SOS strings vanish: a kitty image must not print as base64.
+func TestIgnoredStringsAreSwallowed(t *testing.T) {
+	for _, intro := range []string{"\x1b_", "\x1b^", "\x1bX"} {
+		got := New().ParseAll([]byte("a" + intro + "Gf=100;iVBORw0KGgo\x1b\\b"))
+		if len(got) != 2 || got[0].Rune != 'a' || got[1].Rune != 'b' {
+			t.Fatalf("%q string leaked: %v", intro, got)
+		}
+	}
+}
+
+// A string longer than the limit is dropped whole - never spilled as text.
+func TestOversizedStringIsSwallowed(t *testing.T) {
+	huge := strings.Repeat("A", maxStringLen+10)
+	got := New().ParseAll([]byte("\x1b]52;c;" + huge + "\x07z"))
+	if len(got) != 1 || got[0].Kind != EventPrint || got[0].Rune != 'z' {
+		t.Fatalf("an oversized OSC leaked %d events, first %v", len(got), got[0])
 	}
 }

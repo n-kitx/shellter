@@ -20,6 +20,11 @@ type Config struct {
 	Title string
 	// FontSize in points for the monospaced font.
 	FontSize float64
+	// FontFamily is the terminal font; "" or a font that is not installed
+	// means Menlo. OptionAsMeta hands Option+key over unmodified, for Go to
+	// send as Meta, instead of letting macOS compose a character from it.
+	FontFamily   string
+	OptionAsMeta bool
 	// Rows and Cols are the initial size, in character cells.
 	Rows, Cols int
 	// Chrome is how the window is dressed: padding, translucency, blur.
@@ -88,6 +93,15 @@ type Config struct {
 	OnSelectAll func()
 	// OnClear reports Cmd+K: clear the focused pane's screen and history.
 	OnClear func()
+	// OnFind searches the focused pane: dir is 0 when the query changed, 1
+	// for Find Next (towards older output) and -1 for Find Previous. The
+	// result is reported back with SetFindStatus.
+	OnFind func(query string, dir int)
+	// OnHover follows the pointer over the grid, whether or not a program
+	// asked for mouse reports - it is for the terminal's own use, such as
+	// underlining a link. row is -1 when the pointer leaves. Called again,
+	// with the same cell, when a modifier key goes down or up.
+	OnHover func(row, col int, mods input.Modifiers)
 
 	// --- the application ---
 

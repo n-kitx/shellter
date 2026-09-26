@@ -94,6 +94,11 @@ type Mode struct {
 	// ApplicationCursor is DECCKM, set by "ESC [ ? 1 h" and cleared by
 	// "ESC [ ? 1 l".
 	ApplicationCursor bool
+	// OptionAsMeta is a user setting rather than a program's mode, but it
+	// changes the bytes the same way: Option held means "prefix ESC", the
+	// way Alt does on every other keyboard, instead of "type what macOS
+	// composed". The window hands over the unmodified key in that case.
+	OptionAsMeta bool
 }
 
 // Control bytes worth naming.
@@ -111,6 +116,18 @@ func Encode(k Key, m Mode) []byte {
 	// Command is the window manager's, never the terminal's: Cmd+Q quits,
 	// Cmd+C copies. None of it reaches the shell.
 	if k.Mods.Has(ModCommand) {
+		return nil
+	}
+
+	// Meta is ESC and then the key as it would be without it: Option+B is
+	// "ESC b", which zsh reads as back-a-word, and Option+Delete is "ESC DEL",
+	// delete-a-word. Keys that already carry their modifiers in a parameter -
+	// arrows, function keys - keep doing that instead.
+	if m.OptionAsMeta && k.Mods.Has(ModOption) && metaPrefixed(k.Code) {
+		k.Mods &^= ModOption
+		if b := Encode(k, m); len(b) > 0 {
+			return append([]byte{esc}, b...)
+		}
 		return nil
 	}
 
@@ -208,6 +225,16 @@ func Encode(k Key, m Mode) []byte {
 
 	// Anything else is text: send it as UTF-8, exactly as typed.
 	return []byte(string(k.Chars))
+}
+
+// metaPrefixed reports whether Meta is sent as an ESC prefix for a key, rather
+// than as a modifier parameter the key's own sequence already has room for.
+func metaPrefixed(c Code) bool {
+	switch c {
+	case CodeNone, CodeReturn, CodeTab, CodeBackspace, CodeEscape:
+		return true
+	}
+	return false
 }
 
 // cursorKey builds an arrow-key sequence for the current cursor-key mode, with

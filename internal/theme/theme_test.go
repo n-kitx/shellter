@@ -2,6 +2,7 @@ package theme
 
 import (
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -94,5 +95,29 @@ func TestEveryThemeHasAVisibleSelection(t *testing.T) {
 		if th.Selection == th.Foreground {
 			t.Errorf("%s: selected text would be invisible against its own highlight", th.Name)
 		}
+	}
+}
+
+// A theme file sets the colours it names and inherits the rest.
+func TestParseThemeFile(t *testing.T) {
+	src := `# catppuccin, near enough
+background = #1e1e2e
+foreground = cdd6f4   # without the hash
+color1 = 0xf38ba8
+`
+	th, err := Parse("Mocha", strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if th.Name != "mocha" || th.Background != 0x1e1e2e || th.Foreground != 0xcdd6f4 || th.ANSI[1] != 0xf38ba8 {
+		t.Fatalf("parsed %+v", th)
+	}
+	if th.ANSI[2] != Default().ANSI[2] || th.Selection != Default().Selection {
+		t.Fatal("colours the file left out did not come from the default")
+	}
+
+	_, err = Parse("bad", strings.NewReader("background = blue\ncolor16 = #000000\nshade = #000000\n"))
+	if err == nil || strings.Count(err.Error(), "line") != 3 {
+		t.Fatalf("want all three bad lines reported, got %v", err)
 	}
 }

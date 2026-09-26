@@ -33,6 +33,8 @@ background-blur = off
 window-padding = 20
 scrollback = 5000
 font-size = 16.5
+font-family = "Fira Code"
+option-as-meta = true
 `)
 	nord, ok := theme.Get("nord")
 	if !ok {
@@ -46,6 +48,9 @@ font-size = 16.5
 		WindowPadding:     20,
 		Scrollback:        5000,
 		FontSize:          16.5,
+		FontFamily:        "Fira Code",
+		OptionAsMeta:      true,
+		themesDir:         Default().themesDir,
 	}
 	if cfg != want {
 		t.Errorf("got %+v, want %+v", cfg, want)
@@ -189,8 +194,8 @@ func TestCreateWritesAParseableTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an uncommented setting is invalid: %v", err)
 	}
-	if settings != 7 {
-		t.Fatalf("the template lists %d settings, want every one of the 7", settings)
+	if settings != 9 {
+		t.Fatalf("the template lists %d settings, want every one of the 9", settings)
 	}
 	if cfg != Default() {
 		t.Fatalf("the template's values are not the defaults: %+v", cfg)
@@ -203,5 +208,31 @@ func TestCreateWritesAParseableTemplate(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(path); string(got) != "font-size = 20\n" {
 		t.Fatalf("Create overwrote the user's file: %q", got)
+	}
+}
+
+// A theme that is not built in is looked for as a file in themes/ beside the
+// settings file.
+func TestThemeFromAFile(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "themes"), 0o755)
+	os.WriteFile(filepath.Join(dir, "themes", "mocha"), []byte("background = #1e1e2e\n"), 0o644)
+	settings := filepath.Join(dir, "config")
+	os.WriteFile(settings, []byte("theme = mocha\nfont-family = JetBrains Mono\noption-as-meta = yes\n"), 0o644)
+
+	cfg, err := LoadFrom(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme.Name != "mocha" || cfg.Theme.Background != 0x1e1e2e {
+		t.Fatalf("theme = %+v", cfg.Theme)
+	}
+	if cfg.FontFamily != "JetBrains Mono" || !cfg.OptionAsMeta {
+		t.Fatalf("font %q, option-as-meta %v", cfg.FontFamily, cfg.OptionAsMeta)
+	}
+
+	os.WriteFile(settings, []byte("theme = nope\n"), 0o644)
+	if _, err := LoadFrom(settings); err == nil || !strings.Contains(err.Error(), "themes") {
+		t.Fatalf("a missing theme should say where it looked, got %v", err)
 	}
 }
