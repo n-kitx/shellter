@@ -110,3 +110,11 @@ func (s *Screen) TakeClipboard() []string {
 	s.clipboard = nil
 	return out
 }
+
+// TakeBell reports whether a program rang the bell since it was last called.
+// What a bell sounds or looks like is the window's business, not the screen's.
+func (s *Screen) TakeBell() bool {
+	rang := s.bell
+	s.bell = false
+	return rang
+}

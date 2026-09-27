@@ -50,6 +50,10 @@ type GUI struct {
 	// FontFamily is the terminal font; OptionAsMeta makes Option send Meta.
 	FontFamily   string
 	OptionAsMeta bool
+	// CopyOnSelect copies a selection as soon as the mouse lets go of it, and
+	// Bell is what a program ringing the bell does.
+	CopyOnSelect bool
+	Bell         Bell
 	// Reload reads the settings again, file and flags, for when the file
 	// changes; ThemesDir is where theme files live, so that editing one
 	// counts as a change too. Without Reload, settings are read once.
@@ -86,6 +90,10 @@ type GUI struct {
 	// only, like the selection itself.
 	dragging     *pane
 	lastTracking screen.MouseTracking
+	// lastMotion is the last motion reported to a program, so that the same
+	// cell is not reported twice: xterm reports motion only when the pointer
+	// reaches a new cell, and auto-scroll repeats a drag that has not moved.
+	lastMotion render.Mouse
 
 	// confirm, when set, answers the questions ask would put to the user.
 	// Tests set it; nothing else does.
@@ -170,6 +178,7 @@ func (g *GUI) Run() (int, error) {
 		OnClear:       g.clear,
 		OnFind:        func(q string, dir int) { g.find(q, findDirection(dir)) },
 		OnHover:       g.hover,
+		OnDrop:        g.drop,
 		OnTabRename:   g.renameTab,
 		OnTabMove:     g.moveTab,
 		OnSwapPane:    g.swapPane,
@@ -234,6 +243,9 @@ func (g *GUI) startPane(p *pane) {
 		p.pump(p.sess, func() {
 			if tb := g.tabOf(p); tb != nil {
 				g.panePrinted(tb, p)
+				if p.rang.Swap(false) {
+					render.Post(func() { g.ring(tb, p) })
+				}
 			}
 		})
 		g.forgetPane(p)
@@ -416,6 +428,7 @@ func (g *GUI) selectTab(index int) {
 	}
 	g.active = index
 	g.tabs[index].activity = false // you have now looked at it
+	g.tabs[index].rang = false
 	g.mu.Unlock()
 
 	g.syncTabs()
@@ -520,6 +533,7 @@ func (g *GUI) tabViews() []render.Tab {
 			Title:     name,
 			Activity:  t.activity,
 			Directory: dir,
+			Bell:      t.rang,
 		}
 	}
 	return out
@@ -588,15 +602,18 @@ func (g *GUI) draw() render.Layout {
 
 	for _, pl := range panes {
 		if f, held := pl.pane.heldFrame(); held {
-			out.Panes = append(out.Panes, render.Pane{
+			rp := render.Pane{
 				Rect:    render.Rect{Row: pl.rect.Row, Col: pl.rect.Col, Rows: pl.rect.Rows, Cols: pl.rect.Cols},
 				Frame:   f,
 				Focused: pl.pane == focus,
-			})
+			}
+			g.flash(&rp, pl.pane)
+			out.Panes = append(out.Panes, rp)
 			continue
 		}
 		pl.pane.mu.Lock()
 		snap := pl.pane.scr.SnapshotInto(pl.pane.snapCells)
+		alt := pl.pane.scr.AltScreen()
 		pl.pane.mu.Unlock()
 		pl.pane.snapCells = snap.Cells
 
@@ -614,11 +631,14 @@ func (g *GUI) draw() render.Layout {
 		g.markLink(pl.pane, f, snap.TopLine)
 		pl.pane.lastFrame = f
 
-		out.Panes = append(out.Panes, render.Pane{
+		rp := render.Pane{
 			Rect:    render.Rect{Row: pl.rect.Row, Col: pl.rect.Col, Rows: pl.rect.Rows, Cols: pl.rect.Cols},
 			Frame:   f,
 			Focused: pl.pane == focus,
-		})
+		}
+		g.flash(&rp, pl.pane)
+		g.scrollIndicator(&rp, pl.pane, snap, alt)
+		out.Panes = append(out.Panes, rp)
 	}
 	for _, d := range lines {
 		out.Dividers = append(out.Dividers, render.Rect{
@@ -815,6 +835,17 @@ func (g *GUI) mouse(m render.Mouse) {
 		return
 	}
 	p, local := g.paneAt(m.Row, m.Col)
+	// A selection drag stays with the pane it started in, wherever the pointer
+	// wanders - over a neighbour, or off the grid altogether, which is how the
+	// view is scrolled along with it. A press always starts afresh.
+	if m.Action == input.MousePress {
+		g.dragging = nil
+	}
+	if d := g.dragging; d != nil {
+		if r, ok := g.rectOf(d); ok {
+			p, local = d, render.Mouse{Row: m.Row - r.Row, Col: m.Col - r.Col}
+		}
+	}
 	if p == nil {
 		return
 	}
@@ -836,16 +867,51 @@ func (g *GUI) mouse(m render.Mouse) {
 	// The mouse either marks text or goes to the program. Shift is the way
 	// back from a program that asked for it - see selectable.
 	if selectable(mode.Tracking, m) {
+		if contextClick(m) {
+			g.contextMenu(p)
+			return
+		}
 		g.selectWithMouse(p, local, m, rows, cols)
 		return
 	}
-	g.writeTo(p, input.EncodeMouse(input.MouseEvent{
+	report := render.Mouse{
 		Button: m.Button,
 		Action: m.Action,
 		Row:    clamp(local.Row, 0, rows-1),
 		Col:    clamp(local.Col, 0, cols-1),
+	}
+	if m.Action == input.MouseMove {
+		if report == g.lastMotion {
+			return
+		}
+		g.lastMotion = report
+	} else {
+		g.lastMotion = render.Mouse{}
+	}
+	g.writeTo(p, input.EncodeMouse(input.MouseEvent{
+		Button: report.Button,
+		Action: report.Action,
+		Row:    report.Row,
+		Col:    report.Col,
 		Mods:   m.Mods,
 	}, mode))
+}
+
+// rectOf is where a pane sits in the window, if it is in the tab in front.
+func (g *GUI) rectOf(p *pane) (rect, bool) {
+	tb := g.currentTab()
+	if tb == nil {
+		return rect{}, false
+	}
+	g.mu.Lock()
+	panes, _ := tb.layout(g.grid(), nil, nil)
+	g.mu.Unlock()
+	for _, pl := range panes {
+		if pl.pane == p {
+			return pl.rect, true
+		}
+	}
+	return rect{}, false
 }
 
 // paneAt finds the pane covering a window cell and translates the cell into

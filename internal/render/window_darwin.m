@@ -8,6 +8,7 @@
 // here are simply never released - they live as long as the process.
 
 #import <Cocoa/Cocoa.h>
+#import <Carbon/Carbon.h> // EnableSecureEventInput
 #include <stdlib.h>
 #include <string.h>
 #include "window_darwin.h"
@@ -45,6 +46,7 @@ static BOOL gLinkHover = NO, gLinkCommand = NO;
 static NSArray<NSString *> *gTabTitles = nil;
 static NSString *gTabBusy = @"";
 static NSString *gTabDirs = @"";
+static NSString *gTabBells = @"";
 static int gActiveTab = 0;
 static int gTabPosition = 0; // 0 top, 1 left
 static int gHoverTab = -1;   // the tab under the pointer, or -1
@@ -52,6 +54,7 @@ static BOOL gHoverNew = NO;  // the pointer is over the "+"
 static BOOL gHoverClose = NO; // the pointer is over gHoverTab's close cross
 static NSString *gTitle = @"Shellter";
 static BOOL gCanSplit = YES; // the focused tab has room for another pane
+static id gDelegate = nil;   // the target of every menu item, context menu included
 
 // Chrome settings, pushed in from the configuration file at startup.
 static double gPad = 12;      // points between the window edge and the text
@@ -245,6 +248,10 @@ static NSRect gDividers[kMaxDividers];
 static int gDividerCount = 0;
 static NSRect gCursorDividers[kMaxDividers]; // what the cursor rects were built from
 static int gCursorDividerCount = 0;
+
+// The drag being auto-scrolled, and the timer repeating it. See autoScroll:.
+static NSEvent *gDragEvent = nil;
+static NSTimer *gDragTimer = nil;
 
 @interface ShellterView : NSView <NSTextInputClient>
 @end
@@ -499,10 +506,9 @@ static NSString *plainString(id string) {
     NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
     int r = (int)floor((p.y - gPad) / gLineHeight);
     int c = (int)floor((p.x - gPad) / gCharWidth);
-    // A drag can leave the window; programs expect the edge, not a negative.
-    if (r < 0) {
-        r = 0;
-    }
+    // A drag can leave the window. The column stops at the edge; the row does
+    // not, because a selection dragged above the top or below the bottom is
+    // how the view is scrolled along with it. Go clamps it for programs.
     if (c < 0) {
         c = 0;
     }
@@ -542,7 +548,7 @@ static NSString *plainString(id string) {
         accumulated -= lines;
         int row = 0, col = 0;
         [self cellForEvent:event row:&row col:&col];
-        shellterGoScroll(lines, row, col);
+        shellterGoScroll(lines, MAX(row, 0), col);
     }
 }
 
@@ -552,10 +558,51 @@ static NSString *plainString(id string) {
     [self reportMouse:event button:kMouseLeft action:kMousePress];
 }
 - (void)mouseUp:(NSEvent *)event {
+    [self stopAutoScroll];
     [self reportMouse:event button:kMouseLeft action:kMouseRelease];
 }
 - (void)mouseDragged:(NSEvent *)event {
     [self reportMouse:event button:kMouseLeft action:kMouseMove];
+    [self autoScroll:event];
+}
+
+// A drag held still above or below the grid keeps being reported, twenty
+// times a second, so that a selection carries on scrolling the view while the
+// pointer waits there - AppKit only reports a drag when the mouse moves. Go
+// decides what a report out there means; to a program it means nothing new.
+- (void)autoScroll:(NSEvent *)event {
+    NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
+    int rows = (int)floor((NSHeight([self bounds]) - 2 * gPad) / gLineHeight);
+    if (p.y >= gPad && p.y < gPad + rows * gLineHeight) {
+        [self stopAutoScroll];
+        return;
+    }
+    [gDragEvent release];
+    gDragEvent = [event retain];
+    if (gDragTimer == nil) {
+        // Common modes, so it fires while AppKit is tracking the drag.
+        gDragTimer = [NSTimer timerWithTimeInterval:0.05
+                                             target:self
+                                           selector:@selector(autoScrollTick:)
+                                           userInfo:nil
+                                            repeats:YES];
+        [[NSRunLoop currentRunLoop] addTimer:gDragTimer forMode:NSRunLoopCommonModes];
+    }
+}
+
+- (void)autoScrollTick:(NSTimer *)timer {
+    if (gDragEvent == nil || ([NSEvent pressedMouseButtons] & 1) == 0) {
+        [self stopAutoScroll];
+        return;
+    }
+    [self reportMouse:gDragEvent button:kMouseLeft action:kMouseMove];
+}
+
+- (void)stopAutoScroll {
+    [gDragTimer invalidate];
+    gDragTimer = nil;
+    [gDragEvent release];
+    gDragEvent = nil;
 }
 - (void)rightMouseDown:(NSEvent *)event {
     [self reportMouse:event button:kMouseRight action:kMousePress];
@@ -588,7 +635,7 @@ static NSString *plainString(id string) {
 - (void)reportHover:(NSEvent *)event {
     int row = 0, col = 0;
     [self cellForEvent:event row:&row col:&col];
-    shellterGoHover(row, col, modsFromEvent(event));
+    shellterGoHover(MAX(row, 0), col, modsFromEvent(event)); // -1 means "left"
 }
 
 - (void)mouseExited:(NSEvent *)event {
@@ -684,7 +731,21 @@ void shellterSetLinkHover(int link, int command) {
 }
 
 void shellterBeep(void) {
-    NSBeep();
+    if ([NSThread isMainThread]) {
+        NSBeep();
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+      NSBeep();
+    });
+}
+
+void shellterAttention(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (![NSApp isActive]) {
+          [NSApp requestUserAttention:NSInformationalRequest];
+      }
+    });
 }
 
 void shellterSetCanSplit(int can) {
@@ -759,6 +820,47 @@ char *shellterClipboard(void) {
     shellterGoResize(rows, cols);
 }
 
+// ---------------------------------------------------------------------------
+// Drag and drop
+// ---------------------------------------------------------------------------
+
+// Files dropped on the grid are typed as their paths, the way every Mac
+// terminal does it; dropped text is pasted. Go quotes the paths and decides
+// which pane they go to.
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    return NSDragOperationCopy;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pb = [sender draggingPasteboard];
+    NSArray<NSURL *> *urls = [pb readObjectsForClasses:@[ [NSURL class] ]
+                                               options:@{NSPasteboardURLReadingFileURLsOnlyKey : @YES}];
+    NSString *text = nil;
+    int files = 0;
+    if ([urls count] > 0) {
+        NSMutableArray<NSString *> *paths = [NSMutableArray array];
+        for (NSURL *u in urls) {
+            if ([u path] != nil) {
+                [paths addObject:[u path]];
+            }
+        }
+        text = [paths componentsJoinedByString:@"\n"];
+        files = 1;
+    } else {
+        text = [pb stringForType:NSPasteboardTypeString];
+    }
+    const char *utf8 = [text UTF8String];
+    if (utf8 == NULL || *utf8 == 0) {
+        return NO;
+    }
+    NSPoint p = [self convertPoint:[sender draggingLocation] fromView:nil];
+    int row = MAX(0, (int)floor((p.y - gPad) / gLineHeight));
+    int col = MAX(0, (int)floor((p.x - gPad) / gCharWidth));
+    shellterGoDrop(row, col, (char *)utf8, (int)strlen(utf8), files);
+    [[self window] makeFirstResponder:self];
+    return YES;
+}
+
 @end
 
 // ---------------------------------------------------------------------------
@@ -784,6 +886,7 @@ static BOOL tabFlag(NSString *flags, int i) {
 }
 
 static BOOL tabIsBusy(int i) { return tabFlag(gTabBusy, i); }
+static BOOL tabRang(int i) { return tabFlag(gTabBells, i); }
 
 // A tab named after a directory is a shell waiting at a prompt, and gets a
 // ">_" in front of it. A tab named by the program running in it does not: Go
@@ -901,6 +1004,29 @@ static void drawPrompt(NSRect box, NSColor *color) {
     [p moveToPoint:NSMakePoint(x + 7.5, y + h - 1.5)];
     [p lineToPoint:NSMakePoint(x + w - 0.5, y + h - 1.5)];
     [p stroke];
+}
+
+// drawBell draws a small bell at the left of box, in color, and returns how
+// wide it was. It is the system's own symbol, tinted: the mark for a tab whose
+// program rang the bell while nobody was looking.
+static double drawBell(NSRect box, NSColor *color) {
+    NSImage *symbol = [NSImage imageWithSystemSymbolName:@"bell.fill" accessibilityDescription:@"Bell"];
+    symbol = [symbol imageWithSymbolConfiguration:
+        [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightSemibold]];
+    if (symbol == nil) {
+        return 0;
+    }
+    NSSize size = [symbol size];
+    NSImage *tinted = [NSImage imageWithSize:size flipped:NO drawingHandler:^BOOL(NSRect dst) {
+      [symbol drawInRect:dst];
+      [color set];
+      NSRectFillUsingOperation(dst, NSCompositingOperationSourceAtop);
+      return YES;
+    }];
+    NSRect r = NSMakeRect(NSMinX(box), NSMidY(box) - size.height / 2, size.width, size.height);
+    [tinted drawInRect:r fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
+              fraction:1 respectFlipped:YES hints:nil];
+    return size.width;
 }
 
 // drawLabel centres one line of text vertically in a rect, truncating the
@@ -1041,7 +1167,11 @@ static void titlebarDoubleClicked(NSWindow *window) {
     // if the title is a directory. Both sit ahead of the label, so the
     // label starts wherever they left off.
     double textLeft = r.origin.x + 11;
-    if (tabIsBusy(i)) {
+    if (tabRang(i)) {
+        // The bell says more than the dot, so it stands in for it.
+        textLeft += drawBell(NSMakeRect(textLeft, r.origin.y, 12, r.size.height),
+                             rgb(0xe8, 0xa8, 0x38)) + 6;
+    } else if (tabIsBusy(i)) {
         NSRect dot = NSMakeRect(textLeft, NSMidY(r) - 3, 6, 6);
         [chromeAccent() setFill];
         [[NSBezierPath bezierPathWithOvalInRect:dot] fill];
@@ -1485,6 +1615,30 @@ static void closeFind(void) {
 
 static BOOL gQuitAllowed = NO; // the user already agreed to end everything
 
+// Secure Keyboard Entry: whether the user asked for it, and whether it is on
+// now. The system counts enables and disables, so they must pair exactly.
+static NSString *const kSecureInputKey = @"ShellterSecureKeyboardEntry";
+static BOOL gSecureOn = NO;
+static NSMenuItem *gSecureItem = nil; // its menu item, which shows the setting
+
+static void setSecureInput(BOOL on) {
+    if (on == gSecureOn) {
+        return;
+    }
+    if (on) {
+        EnableSecureEventInput();
+    } else {
+        DisableSecureEventInput();
+    }
+    gSecureOn = on;
+}
+
+static void applySecureInput(void) {
+    BOOL wanted = [[NSUserDefaults standardUserDefaults] boolForKey:kSecureInputKey];
+    setSecureInput(wanted && [NSApp isActive]);
+    [gSecureItem setState:wanted ? NSControlStateValueOn : NSControlStateValueOff];
+}
+
 // setFontSize loads the four faces at a size and measures the cell they make.
 // The fonts are kept for the whole session, and replaced when Cmd+= or Cmd+-
 // changes the size, so they are retained here and the old ones released.
@@ -1747,6 +1901,24 @@ static void dressWindow(NSWindow *window) {
     return YES;
 }
 
+// Secure Keyboard Entry stops other programs from reading keystrokes while
+// Shellter is in front - a password typed at a sudo prompt included. It is on
+// only while Shellter is the active app, as in Terminal.app: left on, it would
+// also stop every other app's global shortcuts working.
+- (void)toggleSecureInput:(id)sender {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    [d setBool:![d boolForKey:kSecureInputKey] forKey:kSecureInputKey];
+    applySecureInput();
+}
+
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    applySecureInput();
+}
+
+- (void)applicationDidResignActive:(NSNotification *)notification {
+    setSecureInput(NO);
+}
+
 - (void)clearBuffer:(id)sender {
     shellterGoClear();
 }
@@ -1852,6 +2024,7 @@ static void installMenu(id target) {
     item(appMenu, @"About Shellter", @selector(orderFrontStandardAboutPanel:), @"", 0, nil);
     [appMenu addItem:[NSMenuItem separatorItem]];
     item(appMenu, @"Settings\u2026", @selector(openSettings:), @",", cmd, target);
+    gSecureItem = item(appMenu, @"Secure Keyboard Entry", @selector(toggleSecureInput:), @"", 0, target);
     [appMenu addItem:[NSMenuItem separatorItem]];
     item(appMenu, @"Hide Shellter", @selector(hide:), @"h", cmd, nil);
     item(appMenu, @"Hide Others", @selector(hideOtherApplications:), @"h",
@@ -2097,11 +2270,14 @@ void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
         [window makeFirstResponder:view];
 
         ShellterDelegate *delegate = [[ShellterDelegate alloc] init];
+        gDelegate = delegate;
+        [view registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
         [window setDelegate:delegate];
         [NSApp setDelegate:delegate];
         [gFindField setDelegate:delegate];
 
         installMenu(delegate);
+        applySecureInput();
         [window center];
         // Where the window was and how big, the last time: AppKit saves the
         // frame under this name whenever it changes, and restores it here.
@@ -2139,7 +2315,8 @@ void shellterSetTitle(const char *title) {
 }
 
 void shellterSetTabs(const char *titles, int len, const char *busy,
-                     const char *dirs, int count, int active, int position) {
+                     const char *dirs, const char *bells, int count, int active,
+                     int position) {
     NSString *joined = (len > 0 && titles != NULL)
                            ? [[[NSString alloc] initWithBytes:titles
                                                        length:(NSUInteger)len
@@ -2147,6 +2324,7 @@ void shellterSetTabs(const char *titles, int len, const char *busy,
                            : @"";
     NSString *busyStr = (busy != NULL) ? [NSString stringWithUTF8String:busy] : @"";
     NSString *dirsStr = (dirs != NULL) ? [NSString stringWithUTF8String:dirs] : @"";
+    NSString *bellsStr = (bells != NULL) ? [NSString stringWithUTF8String:bells] : @"";
     NSArray *parts = (count > 0) ? [joined componentsSeparatedByString:@"\n"] : @[];
 
     // Copied out of the arguments before hopping threads: the Go side frees
@@ -2154,6 +2332,7 @@ void shellterSetTabs(const char *titles, int len, const char *busy,
     [parts retain];
     [busyStr retain];
     [dirsStr retain];
+    [bellsStr retain];
 
     void (^apply)(void) = ^{
       BOOL wasVisible = tabBarVisible();
@@ -2171,6 +2350,8 @@ void shellterSetTabs(const char *titles, int len, const char *busy,
       gTabBusy = busyStr;
       [gTabDirs release];
       gTabDirs = dirsStr;
+      [gTabBells release];
+      gTabBells = bellsStr;
       gActiveTab = active;
       gTabPosition = position;
       if (gHoverTab >= tabCount()) {
@@ -2411,4 +2592,66 @@ void shellterSetChrome(double padding, double opacity, int blur, unsigned int ba
     [gContent setNeedsDisplay:YES];
     [gTabBar setNeedsDisplay:YES];
     [gView setNeedsDisplay:YES];
+}
+
+// ---------------------------------------------------------------------------
+// The context menu, the scroll indicator, the visual bell
+// ---------------------------------------------------------------------------
+
+void shellterContextMenu(int canCopy) {
+    NSEvent *event = [NSApp currentEvent];
+    if (event == nil || gView == nil) {
+        return;
+    }
+    NSMenu *menu = [[[NSMenu alloc] initWithTitle:@""] autorelease];
+    [menu setAutoenablesItems:NO];
+    NSEventModifierFlags cmd = NSEventModifierFlagCommand;
+    BOOL canPaste = [[NSPasteboard generalPasteboard] canReadObjectForClasses:@[ [NSString class] ]
+                                                                      options:nil];
+    [item(menu, @"Copy", @selector(copyText:), @"c", cmd, gDelegate) setEnabled:canCopy != 0];
+    [item(menu, @"Paste", @selector(pasteText:), @"v", cmd, gDelegate) setEnabled:canPaste];
+    item(menu, @"Select All", @selector(selectAllText:), @"a", cmd, gDelegate);
+    [menu addItem:[NSMenuItem separatorItem]];
+    [item(menu, @"Split Right", @selector(splitBeside:), @"d", cmd, gDelegate) setEnabled:gCanSplit];
+    [item(menu, @"Split Down", @selector(splitAbove:), @"d", cmd | NSEventModifierFlagShift, gDelegate)
+        setEnabled:gCanSplit];
+    [menu addItem:[NSMenuItem separatorItem]];
+    item(menu, @"Clear", @selector(clearBuffer:), @"k", cmd, gDelegate);
+    [NSMenu popUpContextMenu:menu withEvent:event forView:gView];
+}
+
+// paneArea is a pane's rectangle, carried out to the edge of the view on any
+// side where the pane meets the edge of the grid - the padding belongs to it.
+static NSRect paneArea(int row, int col, int rows, int cols) {
+    NSRect b = [gView bounds];
+    int gridRows = (int)floor((NSHeight(b) - 2 * gPad) / gLineHeight);
+    int gridCols = (int)floor((NSWidth(b) - 2 * gPad) / gCharWidth);
+    NSRect r = cellRect(row, col, rows, cols);
+    double minX = col == 0 ? 0 : NSMinX(r), minY = row == 0 ? 0 : NSMinY(r);
+    double maxX = col + cols >= gridCols ? NSWidth(b) : NSMaxX(r);
+    double maxY = row + rows >= gridRows ? NSHeight(b) : NSMaxY(r);
+    return NSMakeRect(minX, minY, maxX - minX, maxY - minY);
+}
+
+// The scroll indicator is a thin rounded thumb, the shape of a Mac overlay
+// scroller: in the padding beside the text where there is room for it,
+// otherwise just inside the pane's right edge.
+void shellterDrawScrollbar(int row, int col, int rows, int cols, int above,
+                           int visible, int total, unsigned int rgb) {
+    NSRect cells = cellRect(row, col, rows, cols);
+    NSRect area = paneArea(row, col, rows, cols);
+    double w = 5;
+    double room = NSMaxX(area) - NSMaxX(cells);
+    double x = room >= w + 4 ? NSMaxX(cells) + (room - w) / 2 : NSMaxX(cells) - w - 2;
+
+    double h = NSHeight(cells);
+    double th = MIN(h, MAX(h * visible / total, 24));
+    double ty = NSMinY(cells) + (h - th) * above / MAX(total - visible, 1);
+    [[colorFromRGB(rgb) colorWithAlphaComponent:0.4] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(x, ty, w, th) xRadius:w / 2 yRadius:w / 2] fill];
+}
+
+void shellterFlash(int row, int col, int rows, int cols, unsigned int rgb) {
+    [[colorFromRGB(rgb) colorWithAlphaComponent:0.18] setFill];
+    NSRectFillUsingOperation(paneArea(row, col, rows, cols), NSCompositingOperationSourceOver);
 }

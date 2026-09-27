@@ -56,6 +56,9 @@ type Tab struct {
 	// tab is a shell waiting at a prompt, and the bar marks it with a ">_".
 	// A pane running vim is titled by vim, and a prompt mark there would lie.
 	Directory bool
+	// Bell marks a tab whose program rang the bell while it was in the
+	// background, until it is next looked at.
+	Bell bool
 }
 
 // Chrome is how the window itself looks, as opposed to what the terminal puts

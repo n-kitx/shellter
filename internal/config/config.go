@@ -56,6 +56,13 @@ type Config struct {
 	// "back a word" in zsh - instead of typing the character macOS gives it
 	// (Option+B is "∫").
 	OptionAsMeta bool
+	// Bell is what a program ringing the bell does: "sound", "flash" (the
+	// pane blinks), "both" or "off". A tab in the background is marked either
+	// way, and the Dock icon bounces once if Shellter is not in front.
+	Bell string
+	// CopyOnSelect puts text on the clipboard as soon as it is selected, the
+	// X11 way, rather than waiting for Cmd+C.
+	CopyOnSelect bool
 
 	// themesDir is where theme files are looked for: "themes" beside the
 	// settings file.
@@ -73,6 +80,7 @@ func Default() Config {
 		Scrollback:        screen.DefaultScrollback,
 		FontSize:          14,
 		FontFamily:        "Menlo",
+		Bell:              "sound",
 		themesDir:         themesBeside(Path()),
 	}
 }
@@ -142,12 +150,14 @@ func Create(path string) error {
 # font-family = %s
 # font-size = %g
 # option-as-meta = %t    # Option types Meta (Alt) for the shell, not accents
+# copy-on-select = %t
+# bell = %s    # sound, flash, both or off
 # tab-position = %s    # top or left
 # background-opacity = %g    # 0 to 1
 # background-blur = %t
 # window-padding = %d
 # scrollback = %d
-`, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontFamily, d.FontSize, d.OptionAsMeta, d.TabPosition,
+`, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontFamily, d.FontSize, d.OptionAsMeta, d.CopyOnSelect, d.Bell, d.TabPosition,
 		d.BackgroundOpacity, d.BackgroundBlur, d.WindowPadding, d.Scrollback)
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -220,6 +230,19 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("option-as-meta: %w", err)
 		}
 		c.OptionAsMeta = b
+	case "copy-on-select":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("copy-on-select: %w", err)
+		}
+		c.CopyOnSelect = b
+	case "bell":
+		switch value {
+		case "sound", "flash", "both", "off":
+			c.Bell = value
+		default:
+			return fmt.Errorf("bell must be sound, flash, both or off, not %q", value)
+		}
 	case "tab-position":
 		if value != "top" && value != "left" {
 			return fmt.Errorf("tab-position must be top or left, not %q", value)

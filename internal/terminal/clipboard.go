@@ -40,6 +40,7 @@ func (g *GUI) selectWithMouse(p *pane, at render.Mouse, m render.Mouse, rows, co
 		if g.dragging != p {
 			return
 		}
+		p.edgeScroll(at.Row, rows)
 		p.sel.extend(p.posAt(at.Row, at.Col, rows, cols))
 		p.snapSelection(cols)
 	case input.MouseRelease:
@@ -47,11 +48,41 @@ func (g *GUI) selectWithMouse(p *pane, at render.Mouse, m render.Mouse, rows, co
 			return
 		}
 		g.dragging = nil
+		if g.CopyOnSelect && !p.sel.empty() {
+			p.mu.Lock()
+			text := p.sel.text(p.scr)
+			p.mu.Unlock()
+			render.SetClipboard(text)
+		}
 	default:
 		return
 	}
 	render.Redraw()
 }
+
+// edgeScroll scrolls the view when a selection is dragged past the top or the
+// bottom of the pane, so that it can go on to take in what is out of sight.
+// The further past the edge, the faster: a line per report just outside it,
+// up to maxEdgeScroll further out. The window repeats a drag held still out
+// there twenty times a second, so the scrolling carries on without the mouse
+// moving.
+func (p *pane) edgeScroll(row, rows int) {
+	var lines int
+	switch {
+	case row < 0:
+		lines = clamp(-row, 1, maxEdgeScroll)
+	case row >= rows:
+		lines = -clamp(row-rows+1, 1, maxEdgeScroll)
+	default:
+		return
+	}
+	p.mu.Lock()
+	p.scr.ScrollBy(lines)
+	p.mu.Unlock()
+}
+
+// maxEdgeScroll is the most lines one drag report scrolls.
+const maxEdgeScroll = 3
 
 // posAt turns a place in the window into a place in the session's output.
 //
@@ -205,4 +236,23 @@ func pasteBytes(text string, bracketed bool) []byte {
 func utf8Append(dst []byte, r rune) []byte {
 	var buf [4]byte
 	return append(dst, buf[:utf8.EncodeRune(buf[:], r)]...)
+}
+
+// contextClick reports whether a mouse event asks for the context menu: a
+// right click, or a Control-click, which is the same thing on a Mac with one
+// button.
+func contextClick(m render.Mouse) bool {
+	if m.Action != input.MousePress {
+		return false
+	}
+	return m.Button == input.MouseRight ||
+		(m.Button == input.MouseLeft && m.Mods.Has(input.ModControl))
+}
+
+// contextMenu pops up the menu over pane p. The click has already focused p,
+// so every item acts on it.
+func (g *GUI) contextMenu(p *pane) {
+	g.hovered = linkHover{}
+	render.SetLinkHover(false, false)
+	render.ContextMenu(!p.sel.empty())
 }

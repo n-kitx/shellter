@@ -54,6 +54,8 @@ func run() (int, error) {
 	flag.Float64("font-size", d.FontSize, "terminal font size in points")
 	flag.String("font-family", d.FontFamily, "terminal font, by the name Font Book shows")
 	flag.Bool("option-as-meta", d.OptionAsMeta, "Option sends Meta (Alt) instead of typing accents")
+	flag.Bool("copy-on-select", d.CopyOnSelect, "copy text to the clipboard as soon as it is selected")
+	flag.String("bell", d.Bell, "what the bell does: sound, flash, both or off")
 	flag.Parse()
 
 	// load reads the settings - file, then flags - into the form the window
@@ -76,6 +78,8 @@ func run() (int, error) {
 			TabPosition:     position,
 			ScrollbackLines: cfg.Scrollback,
 			OptionAsMeta:    cfg.OptionAsMeta,
+			CopyOnSelect:    cfg.CopyOnSelect,
+			Bell:            terminal.ParseBell(cfg.Bell),
 			Chrome: render.Chrome{
 				Opacity: cfg.BackgroundOpacity,
 				Blur:    cfg.BackgroundBlur,

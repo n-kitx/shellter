@@ -102,6 +102,9 @@ type Config struct {
 	// underlining a link. row is -1 when the pointer leaves. Called again,
 	// with the same cell, when a modifier key goes down or up.
 	OnHover func(row, col int, mods input.Modifiers)
+	// OnDrop reports something dropped on the grid at a cell: files, as their
+	// paths, or text.
+	OnDrop func(row, col int, paths []string, text string)
 
 	// --- the application ---
 

@@ -108,7 +108,26 @@ func TestEnvironment(t *testing.T) {
 		t.Fatalf("HOME was disturbed: %q", got)
 	}
 
+	// Another terminal's name for itself goes; Shellter's replaces it.
+	env = environment([]string{"TERM_PROGRAM=iTerm.app", "ITERM_SESSION_ID=w0t0p0",
+		"KITTY_WINDOW_ID=1", "KITTYCAT=1", "LC_TERMINAL=iTerm2"}, locale)
+	if got := lookup(env, "TERM_PROGRAM"); len(got) != 1 || got[0] != "Shellter" {
+		t.Fatalf("TERM_PROGRAM = %q", got)
+	}
+	if got := lookup(env, "TERM_PROGRAM_VERSION"); len(got) != 1 || got[0] != Version {
+		t.Fatalf("TERM_PROGRAM_VERSION = %q", got)
+	}
+	for _, k := range []string{"ITERM_SESSION_ID", "KITTY_WINDOW_ID", "LC_TERMINAL"} {
+		if got := lookup(env, k); len(got) != 0 {
+			t.Fatalf("%s survived as %q", k, got)
+		}
+	}
+	if got := lookup(env, "KITTYCAT"); len(got) != 1 {
+		t.Fatalf("a prefix match took an unrelated variable: %q", got)
+	}
+
 	// Started from the Dock: no locale, so the system's is supplied.
+	env = environment([]string{"TERM=xterm-kitty", "HOME=/h", "TERM=screen"}, locale)
 	if got := lookup(env, "LANG"); len(got) != 1 || got[0] != "en_IN.UTF-8" {
 		t.Fatalf("LANG = %q", got)
 	}

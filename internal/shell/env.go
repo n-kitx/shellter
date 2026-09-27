@@ -18,14 +18,50 @@ import (
 // Variables are replaced, never appended twice: with two TERMs in the list,
 // which one a program sees depends on how it reads its environment.
 func environment(base []string, locale func() string) []string {
-	env := set(base, "TERM", "xterm-256color")
+	env := drop(base, foreign)
+	env = set(env, "TERM", "xterm-256color")
 	// TERM cannot say "24-bit colour" - xterm-256color is the most it names -
 	// so programs that can use it (bat, delta, vim themes) look here instead.
 	env = set(env, "COLORTERM", "truecolor")
+	// Which terminal this is, by name: what imgcat, neovim and shell prompts
+	// check before using a feature one terminal has and another lacks.
+	env = set(env, "TERM_PROGRAM", "Shellter")
+	env = set(env, "TERM_PROGRAM_VERSION", Version)
 	if !hasAny(env, "LC_ALL", "LC_CTYPE", "LANG") {
 		env = set(env, "LANG", locale())
 	}
 	return env
+}
+
+// Version is Shellter's version, as TERM_PROGRAM_VERSION gives it. It is the
+// number XTVERSION reports too (screen.Version); the two change together.
+const Version = "0.1.0"
+
+// foreign are variables another terminal sets to say that a shell is running
+// inside it. Started from iTerm - which is how Shellter runs under `go run` -
+// they would be inherited, and imgcat, for one, would send iTerm's image
+// protocol to a terminal that does not speak it. Entries ending in "_" are
+// prefixes.
+var foreign = []string{
+	"ITERM_SESSION_ID", "ITERM_PROFILE", "LC_TERMINAL", "LC_TERMINAL_VERSION",
+	"TERM_SESSION_ID", "KITTY_", "WEZTERM_", "GHOSTTY_",
+	"ALACRITTY_", "VTE_VERSION", "WT_SESSION", "KONSOLE_", "TMUX", "TMUX_PANE",
+}
+
+// drop returns env without the variables named in keys.
+func drop(env []string, keys []string) []string {
+	out := make([]string, 0, len(env))
+next:
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		for _, key := range keys {
+			if k == key || (strings.HasSuffix(key, "_") && strings.HasPrefix(k, key)) {
+				continue next
+			}
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // set returns env with key=value, replacing key's first entry if it has one

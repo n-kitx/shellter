@@ -21,6 +21,33 @@ type Settings struct {
 	TabPosition     render.TabPosition
 	ScrollbackLines int
 	OptionAsMeta    bool
+	CopyOnSelect    bool
+	Bell            Bell
+}
+
+// Bell is what a program ringing the bell does. A background tab is marked,
+// and the Dock icon bounces, whichever it is.
+type Bell int
+
+const (
+	BellSound Bell = iota // the system alert sound
+	BellFlash             // the pane flashes
+	BellBoth
+	BellOff
+)
+
+// ParseBell reads the bell setting. Anything it does not know is the default,
+// since package config has already turned bad values away.
+func ParseBell(s string) Bell {
+	switch s {
+	case "flash":
+		return BellFlash
+	case "both":
+		return BellBoth
+	case "off":
+		return BellOff
+	}
+	return BellSound
 }
 
 // Use takes settings before the window opens.
@@ -32,6 +59,8 @@ func (g *GUI) Use(s Settings) {
 	g.TabPosition = s.TabPosition
 	g.ScrollbackLines = s.ScrollbackLines
 	g.OptionAsMeta = s.OptionAsMeta
+	g.CopyOnSelect = s.CopyOnSelect
+	g.Bell = s.Bell
 }
 
 // apply takes settings while the window is open, changing only what changed.
@@ -42,6 +71,8 @@ func (g *GUI) apply(s Settings) {
 	}
 	g.Palette = s.Palette
 	g.Chrome = s.Chrome
+	g.CopyOnSelect = s.CopyOnSelect
+	g.Bell = s.Bell
 	render.SetChrome(g.chrome())
 
 	// A new font or size resets any zoom: the file is the newer word.

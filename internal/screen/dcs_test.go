@@ -90,3 +90,24 @@ func TestOSC52(t *testing.T) {
 		t.Fatal("the queue was not drained")
 	}
 }
+
+// BEL rings once per take, and the BEL that ends an OSC string is not a bell.
+func TestBell(t *testing.T) {
+	s := New(4, 20)
+	feed(s, "\x1b]0;title\x07")
+	if s.TakeBell() {
+		t.Fatal("the BEL ending an OSC rang the bell")
+	}
+	feed(s, "abc\x07\x07")
+	if !s.TakeBell() {
+		t.Fatal("BEL did not ring")
+	}
+	if s.TakeBell() {
+		t.Fatal("the bell was not cleared")
+	}
+	s = New(4, 20)
+	feed(s, "abcdefghijklmnopqrst\x07x")
+	if got := string(s.LineRunes(s.TopLine()+1, nil)); got[:1] != "x" {
+		t.Fatalf("BEL cancelled the pending wrap: next row %q", got)
+	}
+}

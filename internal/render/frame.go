@@ -41,6 +41,21 @@ type Pane struct {
 	// Focused says whether keystrokes go here. Only the focused pane draws a
 	// cursor, and the others are dimmed, which is how a person can tell.
 	Focused bool
+	// Flash washes the pane in its foreground colour: the visual bell.
+	Flash      bool
+	FlashColor uint32
+	// Scroll is where the view is in the pane's history, for the scroll
+	// indicator; its zero value draws none.
+	Scroll Scroll
+}
+
+// Scroll places a pane's view in its history, in lines: Above is how many
+// lines of it are above the view, Visible how many rows the view shows, and
+// Total how many lines there are altogether, history and screen.
+type Scroll struct {
+	Above, Visible, Total int
+	// Color is what the indicator is drawn in, at part opacity.
+	Color uint32
 }
 
 // Rect is a rectangle of character cells: row 0, column 0 is the top left of

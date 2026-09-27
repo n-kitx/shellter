@@ -2,7 +2,7 @@ package render
 
 /*
 #cgo CFLAGS: -x objective-c -Wno-deprecated-declarations
-#cgo LDFLAGS: -framework Cocoa
+#cgo LDFLAGS: -framework Cocoa -framework Carbon
 #include <stdlib.h>
 #include "window_darwin.h"
 */
@@ -166,12 +166,14 @@ func SetTabs(tabs []Tab, active int, pos TabPosition) {
 	titles := make([]string, len(tabs))
 	busy := make([]byte, len(tabs))
 	dirs := make([]byte, len(tabs))
+	bells := make([]byte, len(tabs))
 	for i, t := range tabs {
 		// Newline is the separator, so a title may not contain one. Shell
 		// titles do not, but a program can set anything it likes.
 		titles[i] = strings.ReplaceAll(t.Title, "\n", " ")
 		busy[i] = flag(t.Activity)
 		dirs[i] = flag(t.Directory)
+		bells[i] = flag(t.Bell)
 	}
 	joined := strings.Join(titles, "\n")
 
@@ -181,8 +183,10 @@ func SetTabs(tabs []Tab, active int, pos TabPosition) {
 	defer C.free(unsafe.Pointer(cBusy))
 	cDirs := C.CString(string(dirs))
 	defer C.free(unsafe.Pointer(cDirs))
+	cBells := C.CString(string(bells))
+	defer C.free(unsafe.Pointer(cBells))
 
-	C.shellterSetTabs(cTitles, C.int(len(joined)), cBusy, cDirs,
+	C.shellterSetTabs(cTitles, C.int(len(joined)), cBusy, cDirs, cBells,
 		C.int(len(tabs)), C.int(active), C.int(pos))
 }
 
@@ -213,8 +217,25 @@ func Clipboard() string {
 }
 
 // Beep is the system alert sound: the answer to a command that cannot be
-// carried out, when there is nothing else to show.
+// carried out, when there is nothing else to show, and the audible bell. Safe
+// from any goroutine.
 func Beep() { C.shellterBeep() }
+
+// Attention bounces the Dock icon once, if Shellter is not the app in front.
+// Safe from any goroutine.
+func Attention() { C.shellterAttention() }
+
+// ContextMenu pops up the right-click menu at the pointer: Copy, Paste, Select
+// All, the splits and Clear, each doing what its menu bar twin does. canCopy
+// greys Copy out when nothing is selected. It returns once the menu closes.
+// Main thread only.
+func ContextMenu(canCopy bool) {
+	var c C.int
+	if canCopy {
+		c = 1
+	}
+	C.shellterContextMenu(c)
+}
 
 // SetCanSplit greys the Split Right and Split Down menu items out, or back in.
 // Safe from any goroutine.
@@ -344,6 +365,7 @@ func shellterGoRender() {
 	split := len(layout.Panes) > 1
 	for _, p := range layout.Panes {
 		drawPane(p, layout.DefaultBG, split && !p.Focused)
+		drawOverlays(p)
 	}
 	for _, d := range layout.Dividers {
 		C.shellterDrawDivider(C.int(d.Row), C.int(d.Col), C.int(d.Rows), C.int(d.Cols))
@@ -398,6 +420,19 @@ func drawPane(p Pane, defaultBG uint32, faded bool) {
 	C.shellterDrawCursor(C.int(row+f.CursorRow), C.int(col+f.CursorCol), C.int(width),
 		bytesOf(glyph), C.int(len(glyph)),
 		C.uint(cell.FG), C.uint(cell.BG), C.int(f.CursorStyle))
+}
+
+// drawOverlays paints what goes over a pane's text: the scroll indicator and
+// the visual bell.
+func drawOverlays(p Pane) {
+	r := p.Rect
+	if sc := p.Scroll; sc.Total > sc.Visible && sc.Visible > 0 {
+		C.shellterDrawScrollbar(C.int(r.Row), C.int(r.Col), C.int(r.Rows), C.int(r.Cols),
+			C.int(sc.Above), C.int(sc.Visible), C.int(sc.Total), C.uint(sc.Color))
+	}
+	if p.Flash {
+		C.shellterFlash(C.int(r.Row), C.int(r.Col), C.int(r.Rows), C.int(r.Cols), C.uint(p.FlashColor))
+	}
 }
 
 // shellterGoKey delivers a keystroke: the text it produces, the unmodified
@@ -603,6 +638,23 @@ func shellterGoHover(row, col C.int, mods C.uint) {
 	if cfg := config(); cfg != nil && cfg.OnHover != nil {
 		cfg.OnHover(int(row), int(col), input.Modifiers(mods))
 	}
+}
+
+// shellterGoDrop reports files or text dropped on the grid. Files arrive as
+// their paths, one per line.
+//
+//export shellterGoDrop
+func shellterGoDrop(row, col C.int, text *C.char, n C.int, files C.int) {
+	cfg := config()
+	if cfg == nil || cfg.OnDrop == nil {
+		return
+	}
+	s := C.GoStringN(text, n)
+	if files != 0 {
+		cfg.OnDrop(int(row), int(col), strings.Split(s, "\n"), "")
+		return
+	}
+	cfg.OnDrop(int(row), int(col), nil, s)
 }
 
 // shellterGoFind reports the search field: a new query, or Find Next or

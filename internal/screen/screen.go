@@ -144,6 +144,10 @@ type Screen struct {
 	// layer above to take it. See dcs.go.
 	clipboard []string
 
+	// bell is set by BEL and cleared by TakeBell. A flag rather than a count:
+	// ten bells in one read are one thing to hear.
+	bell bool
+
 	// replies are bytes owed to the program in answer to a query. The
 	// application layer drains them into the PTY; see reply.go.
 	replies []byte
@@ -681,9 +685,11 @@ func (s *Screen) control(b byte) {
 		s.charsets.shifted = true
 	case 0x0f: // SI: use G0
 		s.charsets.shifted = false
+	case 0x07: // BEL: for the layer above to ring; see TakeBell
+		s.bell = true
 	}
-	// BEL and everything else is ignored, and in particular does not cancel a
-	// pending wrap: it did not move the cursor.
+	// Nothing else here cancels a pending wrap - BEL included: none of it
+	// moved the cursor.
 }
 
 func (s *Screen) csi(e parser.Event) {

@@ -40,8 +40,16 @@ void shellterSetTitle(const char *title);
 // actually asked for motion (?1003). Safe to call from any thread.
 void shellterSetMouseTracking(int enabled);
 
-// shellterBeep plays the system alert sound.
+// shellterBeep plays the system alert sound. Safe to call from any thread.
 void shellterBeep(void);
+
+// shellterAttention bounces the Dock icon once if the app is not active. Safe
+// to call from any thread.
+void shellterAttention(void);
+
+// shellterContextMenu pops up the right-click menu at the current event and
+// returns when it closes. canCopy enables Copy. Main thread only.
+void shellterContextMenu(int canCopy);
 
 // shellterSetCanSplit enables or disables the split menu items. Safe to call
 // from any thread.
@@ -73,12 +81,13 @@ char *shellterClipboard(void);
 //
 // The titles arrive as one string with '\n' between them, which saves
 // marshalling an array across cgo for something that changes a few times a
-// session. busy and dirs are strings of '0'/'1', one character per tab: busy
-// marks a tab that has printed since it was last looked at, dirs one whose
-// title is a directory. position is 0 for top and 1 for left. Safe to call from
-// any thread.
+// session. busy, dirs and bells are strings of '0'/'1', one character per tab:
+// busy marks a tab that has printed since it was last looked at, dirs one
+// whose title is a directory, bells one that rang while in the background.
+// position is 0 for top and 1 for left. Safe to call from any thread.
 void shellterSetTabs(const char *titles, int len, const char *busy,
-                     const char *dirs, int count, int active, int position);
+                     const char *dirs, const char *bells, int count, int active,
+                     int position);
 
 // The drawing primitives Go calls back into while a frame is being painted.
 // Positions are in character cells, colours are 0xRRGGBB, and flags match
@@ -101,5 +110,11 @@ void shellterDrawDivider(int row, int col, int rows, int cols);
 // a block cursor inverts them, an underline or bar is painted in fg.
 // style: 0 block, 1 underline, 2 bar.
 void shellterDrawCursor(int row, int col, int width, const char *utf8, int len, unsigned int fg, unsigned int bg, int style);
+// shellterDrawScrollbar draws a pane's scroll indicator: a thumb along its
+// right edge, placed by how many of total lines are above the visible ones.
+void shellterDrawScrollbar(int row, int col, int rows, int cols, int above,
+                           int visible, int total, unsigned int rgb);
+// shellterFlash washes a pane in a colour, for the visual bell.
+void shellterFlash(int row, int col, int rows, int cols, unsigned int rgb);
 
 #endif

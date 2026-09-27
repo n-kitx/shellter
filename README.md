@@ -753,6 +753,9 @@ see, so that switching to one never shows a grid of the wrong shape.
 | `Cmd+A` | select everything this pane holds, history included |
 | drag | select; double click for a word, triple for a line |
 | `Shift`+drag | select even while a program has asked for the mouse |
+| drag past the top or bottom | keep selecting, scrolling through history |
+| right click / `Ctrl`+click | Copy, Paste, Select All, Split, Clear |
+| drop files on the window | type their paths, escaped for the shell |
 | drag the sidebar's edge | make the tab sidebar wider or narrower (120–480 pt) |
 | double click the title strip | zoom or minimise, as System Settings says |
 | `Cmd+K` | clear: history goes, the prompt line moves to the top |
@@ -1160,7 +1163,18 @@ font-family = JetBrains Mono
 # Option sends Meta (Alt) - Option+B is back-a-word in zsh - instead of
 # typing the character macOS composes (Option+B is ∫)
 option-as-meta = true
+
+# copy a selection the moment the mouse lets go, without Cmd+C
+copy-on-select = true
+
+# what a program ringing the bell does: sound, flash, both or off
+bell = flash
 ```
+
+Whatever `bell` says, a bell in a background tab puts a bell on that tab until
+you look at it, and the Dock icon bounces once if Shellter is not in front.
+Bells closer together than 200 ms count as one, so a program printing BEL in a
+loop does not machine-gun the alert sound.
 
 **Changes apply as soon as the file is saved** - no restart. Shellter checks
 the file, and every file in `themes/` beside it, once a second, re-reads it
@@ -1171,8 +1185,8 @@ purpose: editors save by writing a new file and renaming it over the old one,
 which a watch on the old file never hears about.
 
 A few things are remembered rather than configured: the window's size and
-position, the zoom set with Cmd+= and Cmd+-, and how wide the tab sidebar was
-dragged. They live in macOS's own preferences for the app. A zoom is kept only
+position, the zoom set with Cmd+= and Cmd+-, how wide the tab sidebar was
+dragged, and Shellter > Secure Keyboard Entry. They live in macOS's own preferences for the app. A zoom is kept only
 while `font-size` in the file stays what it was when you zoomed: change the
 file, and the file wins.
 

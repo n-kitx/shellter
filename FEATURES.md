@@ -15,9 +15,10 @@ rather than rediscovering the state by reading the code.
       is not in the C locale. `shell/env.go` (`systemLocale`).
 - [x] `COLORTERM=truecolor`, so bat/delta/vim themes use 24-bit colour.
       `shell/env.go`.
-- [ ] `TERM_PROGRAM=Shellter` (and drop `TERM_PROGRAM_VERSION`). Under `go run`
-      from iTerm we inherit `TERM_PROGRAM=iTerm.app` and `ITERM_SESSION_ID`, so
-      tools like `imgcat` think they are in iTerm. `shell/env.go`.
+- [x] `TERM_PROGRAM=Shellter`, `TERM_PROGRAM_VERSION`; other terminals'
+      variables (`ITERM_SESSION_ID`, `LC_TERMINAL`, `KITTY_*`, `TMUX`, ...)
+      are dropped, so imgcat and friends do not think they are in iTerm.
+      `shell/env.go`.
 - [ ] A Shellter terminfo entry (today `xterm-256color` everywhere).
 
 ## Mac app behaviour
@@ -33,7 +34,7 @@ rather than rediscovering the state by reading the code.
 - [x] Cmd+K clear: history and the rows above the prompt go, the prompt line
       moves to the top (`screen.Clear`). In vim/less only history goes.
 - [x] Cmd+= / Cmd+- / Cmd+0 font size. The window keeps its size and the grid
-      gains or loses cells. Not remembered across launches.
+      gains or loses cells. Remembered (see below).
 - [x] Confirm before closing a pane, tab, the window or the app while a job is
       running, naming it ("vim is still running"). Idle prompts close silently.
       `pty.Foreground` (TIOCGPGRP) vs the shell's pid, `shell.Session.Running`.
@@ -41,7 +42,7 @@ rather than rediscovering the state by reading the code.
       and the zoom (NSUserDefaults). A zoom is dropped if font-size changes.
 - [ ] Session restore after quit.
 - [x] Double click on the title strip zooms / minimises per System Settings.
-- [x] Sidebar width is draggable (120-480 pt), not persisted.
+- [x] Sidebar width is draggable (120-480 pt), and remembered.
 
 ## Keyboard input
 
@@ -54,13 +55,10 @@ rather than rediscovering the state by reading the code.
       letters, Return, Tab, Delete, Escape; arrows keep their parameter.
 - [ ] Application keypad mode (`ESC =`): keypad sends the same bytes either way.
 - [ ] Kitty keyboard protocol (Ctrl+I vs Tab, Shift+Enter vs Enter).
-- [ ] Secure Keyboard Entry (`EnableSecureEventInput`).
+- [x] Secure Keyboard Entry (Shellter menu): on while Shellter is the active
+      app, off while it is not, remembered in NSUserDefaults.
 
 ## Escape sequences
-
-Only OSC 0 and 2 (title) are acted on: `screen.(*Screen).osc` in
-`screen/screen.go`. DCS is not a parser state at all (`parser/parser.go`), so
-DCS payloads print as visible garbage.
 
 - [x] DCS parsing; APC/PM/SOS swallowed; 1 MB string limit that drops an
       oversized string whole. XTGETTCAP and DECRQSS answered.
@@ -80,8 +78,9 @@ DCS payloads print as visible garbage.
 - [x] `DECRQM` mode queries, `XTVERSION`.
 - [ ] `DECLRMM` left/right margins; double-width/height lines.
 - [ ] Sixel / kitty / iTerm image protocols.
-- [ ] BEL: sound or visual bell, Dock bounce, mark on a background tab. Ignored
-      today (`screen/screen.go`).
+- [x] BEL: `bell = sound | flash | both | off`; a background tab gets a bell
+      mark until looked at, the Dock bounces once if Shellter is not in front.
+      At most one bell per pane per 200 ms (`terminal/overlays.go`).
 - [~] Blink: recorded, never animated (`render/frame.go`).
 
 ## Scrollback and selection
@@ -89,17 +88,23 @@ DCS payloads print as visible garbage.
 - [x] Search (Cmd+F, Cmd+G, Cmd+Shift+G, and ↑ ↓ × buttons in the bar):
       whole history, case-insensitive, current match selected. Matches do not cross a row boundary; only the
       current match is highlighted.
-- [ ] Scrollbar / scroll-position indicator.
+- [~] Scroll-position indicator: an overlay thumb while the view is in history
+      and for a second after it moves. Not draggable (`terminal/overlays.go`).
 - [x] Clear scrollback (Cmd+K, see Mac app behaviour).
-- [ ] Auto-scroll when a selection drag reaches the edge.
+- [x] Auto-scroll when a selection drag goes past the top or bottom; the
+      window repeats a drag held still there 20 times a second. A drag stays
+      with the pane it started in.
 - [ ] Rectangular selection (Option+drag).
-- [ ] Copy on select (option).
-- [ ] Right-click menu (Copy, Paste, Clear, Split).
+- [x] Copy on select (`copy-on-select = true`).
+- [x] Right-click / Ctrl+click menu: Copy, Paste, Select All, Split Right/Down,
+      Clear. Goes to the program instead when it asked for the mouse (Shift
+      takes it back, as for selecting).
 - [x] Cmd+click to open URLs and paths (relative to the pane's directory,
       `:line:col` stripped); runnable files are revealed, not opened. Hover
       underlines a link in blue with a tooltip; Cmd brightens it and shows
       the hand pointer.
-- [ ] Drag a file onto the window to paste its path.
+- [x] Drop files on the window to type their paths, backslash-escaped, into
+      the pane under the drop; dropped text is pasted.
 - [x] Reflow on resize, history included (`screen/reflow.go`). Wide
       characters never straddle the edge. Alternate screen is cropped; the
       primary behind it is reflowed. ~0.9 ms per resize at the default 1000

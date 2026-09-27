@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/thakurankit7/shellter/internal/parser"
@@ -71,7 +72,24 @@ type pane struct {
 	// reaches the glass. UI thread only.
 	lastFrame render.Frame
 	syncSince time.Time
+
+	// rang is set by the pump when the program rings the bell, for the GUI to
+	// take in onChunk. flashUntil is when the visual bell stops showing, in
+	// Unix nanoseconds.
+	rang       atomic.Bool
+	flashUntil atomic.Int64
+
+	// scrollOffset is how far back the view was on the last frame, and
+	// scrolledAt when that last changed: the scroll indicator shows while the
+	// view is in history and for a moment after it moves. UI thread only.
+	scrollOffset int
+	scrolledAt   time.Time
 }
+
+// bellInterval is the least time between two bells from one pane. A program
+// printing BEL in a loop would otherwise play the alert sound hundreds of
+// times a second.
+const bellInterval = 200 * time.Millisecond
 
 // newPane starts a shell and gives it a screen of the given size.
 func newPane(cfg shell.Config, rows, cols, scrollback int) (*pane, error) {
@@ -91,6 +109,7 @@ func newPane(cfg shell.Config, rows, cols, scrollback int) (*pane, error) {
 func (p *pane) pump(r io.Reader, onChunk func()) {
 	ps := parser.New()
 	buf := make([]byte, readBufferSize)
+	var lastBell time.Time
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
@@ -98,7 +117,13 @@ func (p *pane) pump(r io.Reader, onChunk func()) {
 			ps.Parse(buf[:n], p.scr.Apply)
 			replies := p.scr.TakeReplies()
 			clips := p.scr.TakeClipboard()
+			bell := p.scr.TakeBell()
 			p.mu.Unlock()
+
+			if bell && time.Since(lastBell) >= bellInterval {
+				lastBell = time.Now()
+				p.rang.Store(true)
+			}
 
 			// A program that asked a question is blocked until it is answered.
 			if len(replies) > 0 {

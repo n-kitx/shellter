@@ -28,6 +28,9 @@ type tab struct {
 	// looked at. It is the GUI's business - only the GUI knows which tab is in
 	// front - so the GUI's lock guards it.
 	activity bool
+	// rang says a program in this tab rang the bell while the tab was in the
+	// background. Cleared, like activity, when the tab is looked at.
+	rang bool
 
 	// name is what the user called the tab, or "" to name it after its shell.
 	// Guarded by the GUI's lock.
