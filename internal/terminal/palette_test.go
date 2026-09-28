@@ -124,10 +124,10 @@ func TestStylesMapToRendererFlags(t *testing.T) {
 		}
 	}
 
-	// Blink is tracked by the screen but deliberately not drawn.
+	// Blink reaches the frame, for the GUI to animate.
 	f = renderScreen(t, "\x1b[5mx", 1, 2)
-	if f.CellAt(0, 0).Flags != 0 {
-		t.Fatalf("flags = %b, want none for blink", f.CellAt(0, 0).Flags)
+	if f.CellAt(0, 0).Flags != render.FlagBlink {
+		t.Fatalf("flags = %b, want just blink", f.CellAt(0, 0).Flags)
 	}
 }
 

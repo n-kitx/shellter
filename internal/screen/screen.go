@@ -121,8 +121,13 @@ type Screen struct {
 	// lastPrint is the character REP ("ESC [ n b") repeats.
 	lastPrint rune
 
-	// cursorStyle is the shape DECSCUSR asked for. Only the renderer reads it.
-	cursorStyle CursorStyle
+	// cursorStyle is the shape DECSCUSR asked for, cursorBlink whether it
+	// asked for it to blink, and cursorChosen whether it asked at all - "ESC [
+	// 0 SP q" and a program that never said are both the user's setting.
+	// Only the renderer reads them.
+	cursorStyle  CursorStyle
+	cursorBlink  bool
+	cursorChosen bool
 
 	// title is what OSC 0/2 last set the window title to, and titleStack the
 	// titles a program has pushed aside while it borrows the window.
@@ -320,7 +325,7 @@ func (s *Screen) Reset() {
 	s.resetScrollRegion()
 	s.tabs = defaultTabs(s.cols)
 	s.charsets = defaultCharsets()
-	s.cursorStyle = CursorBlock
+	s.cursorStyle, s.cursorBlink, s.cursorChosen = CursorBlock, false, false
 	s.title = ""
 	s.titleStack = nil
 	s.sb.clear()
@@ -861,9 +866,11 @@ func (s *Screen) escape(e parser.Event) {
 		s.reverseLineFeed()
 	case 'c': // RIS - reset to initial state
 		s.Reset()
+	case '=': // DECKPAM - the keypad sends application sequences
+		s.mode.ApplicationKeypad = true
+	case '>': // DECKPNM - the keypad types numbers again
+		s.mode.ApplicationKeypad = false
 	}
-	// ESC = and ESC > (application/numeric keypad) are recognised by the parser
-	// and ignored here: our keypad sends the same bytes either way.
 }
 
 // alignmentTest implements DECALN, which fills the screen with capital E. It
@@ -1128,10 +1135,13 @@ type Snapshot struct {
 	// this particular view they fall. See lines.go.
 	TopLine int64
 
-	// CursorStyle is the shape the program asked for, and Title what it last
-	// set the window title to.
-	CursorStyle CursorStyle
-	Title       string
+	// CursorStyle is the shape the program asked for and CursorBlink whether
+	// it blinks; CursorChosen is false when the program left both to the
+	// user's settings. Title is what it last set the window title to.
+	CursorStyle  CursorStyle
+	CursorBlink  bool
+	CursorChosen bool
+	Title        string
 }
 
 // CellAt returns the cell at row, col, or a blank one if that is off-grid.
@@ -1201,6 +1211,8 @@ func (s *Screen) SnapshotInto(buf []Cell) Snapshot {
 		ScrollbackLen: s.sb.Len(),
 		TopLine:       s.TopLine(),
 		CursorStyle:   s.cursorStyle,
+		CursorBlink:   s.cursorBlink,
+		CursorChosen:  s.cursorChosen,
 		Title:         s.title,
 	}
 }

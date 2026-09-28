@@ -153,3 +153,21 @@ func TestSelectingToTheStartOfTheNextLineKeepsTheNewline(t *testing.T) {
 		t.Fatalf("Text = %q, want %q", got, "abc\n")
 	}
 }
+
+// A block is the same columns of every line, a line of text per row.
+func TestBlockText(t *testing.T) {
+	s := New(4, 12)
+	for _, l := range []string{"id  name   \r\n", "1   alpha\r\n", "22  b\r\n", "333 charlie!"} {
+		feed(s, l)
+	}
+	top := s.TopLine()
+	if got, want := s.BlockText(top, top+3, 4, 9), "name\nalpha\nb\ncharl"; got != want {
+		t.Fatalf("block = %q, want %q", got, want)
+	}
+	if got := s.BlockText(top, top+3, 0, 3); got != "id\n1\n22\n333" {
+		t.Fatalf("first column = %q", got)
+	}
+	if got := s.BlockText(top+2, top+1, 0, 3); got != "" {
+		t.Fatalf("an upside-down block gave %q", got)
+	}
+}

@@ -25,6 +25,9 @@ type Config struct {
 	// send as Meta, instead of letting macOS compose a character from it.
 	FontFamily   string
 	OptionAsMeta bool
+	// LineHeight scales the rows: 1 is the font's own line spacing, 1.2 a
+	// fifth more, with the text centred in the extra room.
+	LineHeight float64
 	// Rows and Cols are the initial size, in character cells.
 	Rows, Cols int
 	// Chrome is how the window is dressed: padding, translucency, blur.
@@ -42,6 +45,9 @@ type Config struct {
 	// into history. Row and col are where the pointer was, which matters when
 	// the wheel has to be reported to the program as a button.
 	OnScroll func(lines, row, col int)
+	// OnScrollTo reports a scroll thumb being dragged: the pane whose top-left
+	// cell is row, col should show its history with above lines above it.
+	OnScrollTo func(row, col, above int)
 	// OnMouse reports a mouse event in character cells. Whether the program
 	// running in the terminal wants to hear about it is not this package's
 	// question; it reports, the application decides.
@@ -131,6 +137,11 @@ type Mouse struct {
 	Clicks int
 }
 
+// modKeypad is the bit keyDown: adds to the modifiers of a key on the numeric
+// keypad. It travels with them across cgo and is taken off again in classify:
+// it is a fact about the key, not a modifier held.
+const modKeypad input.Modifiers = 1 << 4
+
 // AppKit reports arrows and function keys as Unicode private-use values.
 const (
 	keyUp    = 0xF700
@@ -157,7 +168,7 @@ const (
 // -charactersIgnoringModifiers (the physical key), which is what identifies a
 // special key and what Ctrl arithmetic must use.
 func classify(chars, base string, mods input.Modifiers) input.Key {
-	k := input.Key{Chars: []rune(chars), Mods: mods}
+	k := input.Key{Chars: []rune(chars), Mods: mods &^ modKeypad, Keypad: mods&modKeypad != 0}
 	if br := []rune(base); len(br) > 0 {
 		k.Base = br[0]
 	}

@@ -135,6 +135,43 @@ func (s *Screen) Text(from, to Pos) string {
 	return b.String()
 }
 
+// BlockText is the text of a rectangle rather than a run: columns fromCol up
+// to toCol of every line from first to last, one line of text per row whether
+// or not the row wrapped, each without its trailing blanks. It is what an
+// Option-drag selects - a column of a table, say, or the numbers down the side
+// of a listing.
+//
+// A wide character is taken whole if its first half is inside the rectangle,
+// and left out if only its second half is.
+func (s *Screen) BlockText(first, last int64, fromCol, toCol int) string {
+	if first < s.FirstLine() {
+		first = s.FirstLine()
+	}
+	if last >= s.TotalLines() {
+		last = s.TotalLines() - 1
+	}
+	fromCol, toCol = clamp(fromCol, 0, s.cols), clamp(toCol, 0, s.cols)
+	if first > last || fromCol >= toCol {
+		return ""
+	}
+	buf := make([]Cell, s.cols)
+	var b strings.Builder
+	for n := first; n <= last; n++ {
+		if n > first {
+			b.WriteByte('\n')
+		}
+		if _, ok := s.lineAt(n, buf); !ok {
+			continue
+		}
+		end := toCol
+		for end > fromCol && isBlankish(buf[end-1]) {
+			end--
+		}
+		writeCells(&b, buf[fromCol:end])
+	}
+	return b.String()
+}
+
 // writeCells appends the text of a run of cells, skipping the second half of
 // every wide character - it has no text of its own.
 func writeCells(b *strings.Builder, cells []Cell) {

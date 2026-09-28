@@ -54,6 +54,11 @@ type GUI struct {
 	// Bell is what a program ringing the bell does.
 	CopyOnSelect bool
 	Bell         Bell
+	// CursorStyle and CursorBlink are the cursor a program gets until it asks
+	// for another; LineHeight scales the rows.
+	CursorStyle render.CursorStyle
+	CursorBlink bool
+	LineHeight  float64
 	// Reload reads the settings again, file and flags, for when the file
 	// changes; ThemesDir is where theme files live, so that editing one
 	// counts as a change too. Without Reload, settings are read once.
@@ -109,6 +114,17 @@ type GUI struct {
 	hoverRunes []rune
 	hoverCols  []int
 
+	// Blinking - the cursor, and text drawn with SGR 5. blinkOff is the half
+	// of the cycle when blinking things are hidden; blinkWanted says the last
+	// frame had something that blinks, so the timer has work to do;
+	// typedAt holds the blink still, visible, while keys are arriving; and
+	// windowFocused is whether the window has the keyboard - an unfocused
+	// window's cursor does not blink.
+	blinkOff      atomic.Bool
+	blinkWanted   atomic.Bool
+	typedAt       atomic.Int64
+	windowFocused atomic.Bool
+
 	// out, when set, replaces the active tab's PTY as the destination for
 	// encoded input. Tests set it; nothing else does.
 	out io.Writer
@@ -123,6 +139,7 @@ func NewGUI() *GUI {
 		Title:           "Shellter",
 		FontSize:        14,
 		Palette:         DefaultPalette(),
+		LineHeight:      1,
 		ScrollbackLines: screen.DefaultScrollback,
 		TabPosition:     render.TabsTop,
 		Chrome:          render.DefaultChrome(),
@@ -145,12 +162,14 @@ func (g *GUI) Run() (int, error) {
 
 	stop := make(chan struct{})
 	go g.watchSettings(stop)
+	go g.blinker(stop)
 	defer close(stop)
 
 	runErr := render.Run(render.Config{
 		Title:         g.Title,
 		FontSize:      g.FontSize,
 		FontFamily:    g.FontFamily,
+		LineHeight:    g.LineHeight,
 		OptionAsMeta:  g.OptionAsMeta,
 		Rows:          g.rows,
 		Cols:          g.cols,
@@ -162,6 +181,7 @@ func (g *GUI) Run() (int, error) {
 		OnKey:         g.key,
 		OnResize:      g.resize,
 		OnScroll:      g.scroll,
+		OnScrollTo:    g.scrollTo,
 		OnMouse:       g.mouse,
 		OnFocus:       g.focus,
 		OnClose:       g.closeWindow,
@@ -599,6 +619,8 @@ func (g *GUI) draw() render.Layout {
 	g.mu.Unlock()
 
 	out.Panes, out.Dividers = g.paneOut[:0], g.dividerOut[:0]
+	blinking := false
+	defer func() { g.blinkWanted.Store(blinking) }()
 
 	for _, pl := range panes {
 		if f, held := pl.pane.heldFrame(); held {
@@ -629,6 +651,9 @@ func (g *GUI) draw() render.Layout {
 		f := g.Palette.FrameInto(snap, pl.pane.frameCells, marked)
 		pl.pane.frameCells = f.Cells
 		g.markLink(pl.pane, f, snap.TopLine)
+		if g.blink(&f, snap, pl.pane == focus) {
+			blinking = true
+		}
 		pl.pane.lastFrame = f
 
 		rp := render.Pane{
@@ -687,6 +712,7 @@ func (g *GUI) key(k input.Key) {
 		g.hovered = linkHover{}
 		render.SetLinkHover(false, false)
 	}
+	g.typed()
 	b := g.encode(k)
 	if len(b) == 0 {
 		return
@@ -959,6 +985,8 @@ func (g *GUI) focusOn(p *pane) {
 
 // focus tells the program the window gained or lost focus, if it asked (?1004).
 func (g *GUI) focus(focused bool) {
+	g.windowFocused.Store(focused)
+	g.requestRedraw() // the cursor starts or stops blinking
 	t := g.current()
 	if t == nil {
 		return
@@ -985,6 +1013,13 @@ func (g *GUI) encode(k input.Key) []byte {
 	if t := g.current(); t != nil {
 		t.mu.Lock()
 		mode.ApplicationCursor = t.scr.ApplicationCursorKeys()
+		// Application keypad mode is honoured only for full-screen programs.
+		// zsh setups like oh-my-zsh switch it on at every prompt (terminfo's
+		// smkx is "ESC [ ? 1 h ESC =") without binding a single keypad
+		// sequence, so honouring it there would make the keypad type junk.
+		// The programs that do want it - vim, mc, roguelikes - all run on
+		// the alternate screen.
+		mode.ApplicationKeypad = t.scr.Modes().ApplicationKeypad && t.scr.AltScreen()
 		t.mu.Unlock()
 	}
 	return input.Encode(k, mode)

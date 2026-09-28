@@ -82,6 +82,10 @@ type Key struct {
 	Base rune
 	// Mods are the modifier keys held.
 	Mods Modifiers
+	// Keypad says the key is on the numeric keypad, which matters only in
+	// application keypad mode: then the keypad's 5 is not the same key as
+	// the 5 above the letters.
+	Keypad bool
 }
 
 // Mode is the part of the terminal's state that changes what a key sends.
@@ -99,6 +103,9 @@ type Mode struct {
 	// way Alt does on every other keyboard, instead of "type what macOS
 	// composed". The window hands over the unmodified key in that case.
 	OptionAsMeta bool
+	// ApplicationKeypad is DECKPAM, set by "ESC =" and cleared by "ESC >":
+	// the numeric keypad sends SS3 sequences instead of what is printed on it.
+	ApplicationKeypad bool
 }
 
 // Control bytes worth naming.
@@ -123,6 +130,12 @@ func Encode(k Key, m Mode) []byte {
 	// "ESC b", which zsh reads as back-a-word, and Option+Delete is "ESC DEL",
 	// delete-a-word. Keys that already carry their modifiers in a parameter -
 	// arrows, function keys - keep doing that instead.
+	if m.ApplicationKeypad && k.Keypad {
+		if b, ok := keypadKey(k); ok {
+			return b
+		}
+	}
+
 	if m.OptionAsMeta && k.Mods.Has(ModOption) && metaPrefixed(k.Code) {
 		k.Mods &^= ModOption
 		if b := Encode(k, m); len(b) > 0 {
@@ -225,6 +238,29 @@ func Encode(k Key, m Mode) []byte {
 
 	// Anything else is text: send it as UTF-8, exactly as typed.
 	return []byte(string(k.Chars))
+}
+
+// keypadFinals are the SS3 finals the keypad sends in application mode, by
+// what is printed on the key. 0x03 is Enter, as macOS reports it.
+var keypadFinals = map[rune]byte{
+	'0': 'p', '1': 'q', '2': 'r', '3': 's', '4': 't',
+	'5': 'u', '6': 'v', '7': 'w', '8': 'x', '9': 'y',
+	'.': 'n', '+': 'k', '-': 'm', '*': 'j', '/': 'o', '=': 'X',
+	0x03: 'M', '\r': 'M',
+}
+
+// keypadKey is a keypad key in application keypad mode: "ESC O" and a final
+// that names the key rather than the character on it. Control and Option
+// make it an ordinary key again - there is no sequence for Ctrl+keypad-5.
+func keypadKey(k Key) ([]byte, bool) {
+	if k.Mods.Has(ModControl) || k.Mods.Has(ModOption) || len(k.Chars) != 1 {
+		return nil, false
+	}
+	final, ok := keypadFinals[k.Chars[0]]
+	if !ok {
+		return nil, false
+	}
+	return []byte{esc, 'O', final}, true
 }
 
 // metaPrefixed reports whether Meta is sent as an ESC prefix for a key, rather

@@ -65,6 +65,9 @@ func (s *Screen) requestSetting(what string) {
 		s.reply("\x1bP1$r%d;%dr\x1b\\", s.top+1, s.bottom+1)
 	case " q": // DECSCUSR: the cursor shape, as the code that would set it
 		code := map[CursorStyle]int{CursorBlock: 2, CursorUnderline: 4, CursorBar: 6}[s.cursorStyle]
+		if s.cursorBlink {
+			code--
+		}
 		s.reply("\x1bP1$r%d q\x1b\\", code)
 	default:
 		s.reply("\x1bP0$r\x1b\\")

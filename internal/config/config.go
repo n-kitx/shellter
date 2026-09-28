@@ -63,6 +63,13 @@ type Config struct {
 	// CopyOnSelect puts text on the clipboard as soon as it is selected, the
 	// X11 way, rather than waiting for Cmd+C.
 	CopyOnSelect bool
+	// CursorStyle is "block", "underline" or "bar", and CursorBlink whether
+	// it blinks. A program that asks for a shape of its own (vim's bar in
+	// insert mode) gets it until it hands the cursor back.
+	CursorStyle string
+	CursorBlink bool
+	// LineHeight scales the rows: 1 is the font's own spacing.
+	LineHeight float64
 
 	// themesDir is where theme files are looked for: "themes" beside the
 	// settings file.
@@ -81,6 +88,8 @@ func Default() Config {
 		FontSize:          14,
 		FontFamily:        "Menlo",
 		Bell:              "sound",
+		CursorStyle:       "block",
+		LineHeight:        1,
 		themesDir:         themesBeside(Path()),
 	}
 }
@@ -151,13 +160,17 @@ func Create(path string) error {
 # font-size = %g
 # option-as-meta = %t    # Option types Meta (Alt) for the shell, not accents
 # copy-on-select = %t
+# cursor-style = %s    # block, underline or bar
+# cursor-blink = %t
+# line-height = %g    # 1 is the font's own spacing; 1.2 is a fifth taller
 # bell = %s    # sound, flash, both or off
 # tab-position = %s    # top or left
 # background-opacity = %g    # 0 to 1
 # background-blur = %t
 # window-padding = %d
 # scrollback = %d
-`, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontFamily, d.FontSize, d.OptionAsMeta, d.CopyOnSelect, d.Bell, d.TabPosition,
+`, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontFamily, d.FontSize, d.OptionAsMeta, d.CopyOnSelect,
+		d.CursorStyle, d.CursorBlink, d.LineHeight, d.Bell, d.TabPosition,
 		d.BackgroundOpacity, d.BackgroundBlur, d.WindowPadding, d.Scrollback)
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -236,6 +249,25 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("copy-on-select: %w", err)
 		}
 		c.CopyOnSelect = b
+	case "cursor-style":
+		switch value {
+		case "block", "underline", "bar":
+			c.CursorStyle = value
+		default:
+			return fmt.Errorf("cursor-style must be block, underline or bar, not %q", value)
+		}
+	case "cursor-blink":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("cursor-blink: %w", err)
+		}
+		c.CursorBlink = b
+	case "line-height":
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil || f < 0.8 || f > 3 {
+			return fmt.Errorf("line-height must be between 0.8 and 3, not %q", value)
+		}
+		c.LineHeight = f
 	case "bell":
 		switch value {
 		case "sound", "flash", "both", "off":

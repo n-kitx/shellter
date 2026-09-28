@@ -56,6 +56,9 @@ func run() (int, error) {
 	flag.Bool("option-as-meta", d.OptionAsMeta, "Option sends Meta (Alt) instead of typing accents")
 	flag.Bool("copy-on-select", d.CopyOnSelect, "copy text to the clipboard as soon as it is selected")
 	flag.String("bell", d.Bell, "what the bell does: sound, flash, both or off")
+	flag.String("cursor-style", d.CursorStyle, "cursor shape: block, underline or bar")
+	flag.Bool("cursor-blink", d.CursorBlink, "blink the cursor")
+	flag.Float64("line-height", d.LineHeight, "row height as a multiple of the font's own, 0.8 to 3")
 	flag.Parse()
 
 	// load reads the settings - file, then flags - into the form the window
@@ -80,6 +83,9 @@ func run() (int, error) {
 			OptionAsMeta:    cfg.OptionAsMeta,
 			CopyOnSelect:    cfg.CopyOnSelect,
 			Bell:            terminal.ParseBell(cfg.Bell),
+			CursorStyle:     terminal.ParseCursorStyle(cfg.CursorStyle),
+			CursorBlink:     cfg.CursorBlink,
+			LineHeight:      cfg.LineHeight,
 			Chrome: render.Chrome{
 				Opacity: cfg.BackgroundOpacity,
 				Blur:    cfg.BackgroundBlur,

@@ -53,7 +53,9 @@ rather than rediscovering the state by reading the code.
       off by default so held keys repeat.
 - [x] Option-as-Meta setting (`option-as-meta = true`): ESC prefix for
       letters, Return, Tab, Delete, Escape; arrows keep their parameter.
-- [ ] Application keypad mode (`ESC =`): keypad sends the same bytes either way.
+- [x] Application keypad mode (`ESC =`, `?66`): the keypad sends `ESC O p`...
+      to full-screen programs. Not at a shell prompt, where oh-my-zsh's smkx
+      turns it on without binding any of it.
 - [ ] Kitty keyboard protocol (Ctrl+I vs Tab, Shift+Enter vs Enter).
 - [x] Secure Keyboard Entry (Shellter menu): on while Shellter is the active
       app, off while it is not, remembered in NSUserDefaults.
@@ -81,20 +83,23 @@ rather than rediscovering the state by reading the code.
 - [x] BEL: `bell = sound | flash | both | off`; a background tab gets a bell
       mark until looked at, the Dock bounces once if Shellter is not in front.
       At most one bell per pane per 200 ms (`terminal/overlays.go`).
-- [~] Blink: recorded, never animated (`render/frame.go`).
+- [x] Blink: SGR 5 text blinks, hidden on the off beat (`terminal/blink.go`).
+      One 530 ms timer, which redraws only while something blinks.
 
 ## Scrollback and selection
 
 - [x] Search (Cmd+F, Cmd+G, Cmd+Shift+G, and ↑ ↓ × buttons in the bar):
       whole history, case-insensitive, current match selected. Matches do not cross a row boundary; only the
       current match is highlighted.
-- [~] Scroll-position indicator: an overlay thumb while the view is in history
-      and for a second after it moves. Not draggable (`terminal/overlays.go`).
+- [x] Scroll thumb: shown while the view is in history and for a second after
+      it moves, and whenever the pointer is over the pane's right edge, where
+      it widens; drag it, or click its track to jump there.
 - [x] Clear scrollback (Cmd+K, see Mac app behaviour).
 - [x] Auto-scroll when a selection drag goes past the top or bottom; the
       window repeats a drag held still there 20 times a second. A drag stays
       with the pane it started in.
-- [ ] Rectangular selection (Option+drag).
+- [x] Rectangular selection (Option+drag), copied a line of text per row
+      (`screen.BlockText`).
 - [x] Copy on select (`copy-on-select = true`).
 - [x] Right-click / Ctrl+click menu: Copy, Paste, Select All, Split Right/Down,
       Clear. Goes to the program instead when it asked for the mouse (Shift
@@ -133,7 +138,8 @@ rather than rediscovering the state by reading the code.
 ## Text and rendering
 
 - [x] Font family setting (`font-family`), falling back to Menlo.
-- [ ] Ligatures, line height, bold-as-bright.
+- [x] Line height (`line-height`, 0.8-3), text centred in the row.
+- [ ] Ligatures, bold-as-bright.
 - [ ] Grapheme clusters: width is per rune plus combining marks, so ZWJ emoji
       and flags take one cell per component (`text/width.go`).
 - [ ] GPU (Metal) rendering. Today it is `NSString drawAtPoint:` per run.
@@ -144,7 +150,10 @@ rather than rediscovering the state by reading the code.
 
 - [x] Live reload of the settings file and theme files (1 s poll).
 - [x] Custom themes: a file in `themes/` beside the settings file.
-- [ ] Settings for cursor style and key bindings.
+- [x] Cursor style and blink settings (`cursor-style`, `cursor-blink`); a
+      program's DECSCUSR wins until it sends `ESC [ 0 SP q`. Blinks only in the
+      focused pane of a focused window, held steady while typing.
+- [ ] Key binding settings.
 - [ ] Profiles; a Preferences window.
 
 ## Accessibility

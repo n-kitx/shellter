@@ -3,6 +3,7 @@ package screen
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"testing"
 )
 
@@ -109,5 +110,56 @@ func TestBell(t *testing.T) {
 	feed(s, "abcdefghijklmnopqrst\x07x")
 	if got := string(s.LineRunes(s.TopLine()+1, nil)); got[:1] != "x" {
 		t.Fatalf("BEL cancelled the pending wrap: next row %q", got)
+	}
+}
+
+// ESC = and ESC > switch the keypad, and ?66 is the same switch.
+func TestApplicationKeypad(t *testing.T) {
+	s := New(4, 20)
+	if s.Modes().ApplicationKeypad {
+		t.Fatal("on from the start")
+	}
+	feed(s, "\x1b=")
+	if !s.Modes().ApplicationKeypad {
+		t.Fatal("ESC = did not turn it on")
+	}
+	feed(s, "\x1b[?66$p")
+	if got := replies(s); got != "\x1b[?66;1$y" {
+		t.Fatalf("DECRQM ?66 = %q", got)
+	}
+	feed(s, "\x1b>")
+	if s.Modes().ApplicationKeypad {
+		t.Fatal("ESC > did not turn it off")
+	}
+	feed(s, "\x1b[?66h")
+	if !s.Modes().ApplicationKeypad {
+		t.Fatal("?66h did not turn it on")
+	}
+}
+
+// DECSCUSR's odd codes blink, and 0 hands the cursor back to the user.
+func TestCursorStyleAndBlink(t *testing.T) {
+	s := New(4, 20)
+	if snap := s.Snapshot(); snap.CursorChosen {
+		t.Fatal("a cursor was chosen before any program asked")
+	}
+	for code, want := range map[int]struct {
+		style CursorStyle
+		blink bool
+	}{1: {CursorBlock, true}, 2: {CursorBlock, false}, 3: {CursorUnderline, true},
+		4: {CursorUnderline, false}, 5: {CursorBar, true}, 6: {CursorBar, false}} {
+		feed(s, fmt.Sprintf("\x1b[%d q", code))
+		snap := s.Snapshot()
+		if !snap.CursorChosen || snap.CursorStyle != want.style || snap.CursorBlink != want.blink {
+			t.Errorf("DECSCUSR %d: style %v blink %v chosen %v", code, snap.CursorStyle, snap.CursorBlink, snap.CursorChosen)
+		}
+		feed(s, "\x1bP$q q\x1b\\")
+		if got := replies(s); got != fmt.Sprintf("\x1bP1$r%d q\x1b\\", code) {
+			t.Errorf("DECRQSS after %d = %q", code, got)
+		}
+	}
+	feed(s, "\x1b[0 q")
+	if s.Snapshot().CursorChosen {
+		t.Fatal("DECSCUSR 0 did not hand the cursor back")
 	}
 }

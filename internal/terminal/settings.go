@@ -23,6 +23,21 @@ type Settings struct {
 	OptionAsMeta    bool
 	CopyOnSelect    bool
 	Bell            Bell
+	CursorStyle     render.CursorStyle
+	CursorBlink     bool
+	LineHeight      float64
+}
+
+// ParseCursorStyle reads the cursor-style setting; package config has already
+// turned away anything else.
+func ParseCursorStyle(s string) render.CursorStyle {
+	switch s {
+	case "underline":
+		return render.CursorUnderline
+	case "bar":
+		return render.CursorBar
+	}
+	return render.CursorBlock
 }
 
 // Bell is what a program ringing the bell does. A background tab is marked,
@@ -61,6 +76,8 @@ func (g *GUI) Use(s Settings) {
 	g.OptionAsMeta = s.OptionAsMeta
 	g.CopyOnSelect = s.CopyOnSelect
 	g.Bell = s.Bell
+	g.CursorStyle, g.CursorBlink = s.CursorStyle, s.CursorBlink
+	g.LineHeight = s.LineHeight
 }
 
 // apply takes settings while the window is open, changing only what changed.
@@ -73,12 +90,13 @@ func (g *GUI) apply(s Settings) {
 	g.Chrome = s.Chrome
 	g.CopyOnSelect = s.CopyOnSelect
 	g.Bell = s.Bell
+	g.CursorStyle, g.CursorBlink = s.CursorStyle, s.CursorBlink
 	render.SetChrome(g.chrome())
 
 	// A new font or size resets any zoom: the file is the newer word.
-	if s.FontFamily != g.FontFamily || s.FontSize != g.FontSize {
-		g.FontFamily, g.FontSize = s.FontFamily, s.FontSize
-		render.SetFont(s.FontFamily, s.FontSize)
+	if s.FontFamily != g.FontFamily || s.FontSize != g.FontSize || s.LineHeight != g.LineHeight {
+		g.FontFamily, g.FontSize, g.LineHeight = s.FontFamily, s.FontSize, s.LineHeight
+		render.SetFont(s.FontFamily, s.FontSize, s.LineHeight)
 	}
 	if s.OptionAsMeta != g.OptionAsMeta {
 		g.OptionAsMeta = s.OptionAsMeta

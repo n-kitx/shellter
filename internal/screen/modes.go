@@ -27,8 +27,14 @@ type Modes struct {
 	AutoWrap bool
 	// CursorVisible is DECTCEM (?25), on by default. Read by the renderer.
 	CursorVisible bool
-	// CursorBlink is ?12. Tracked for the renderer; we draw a steady cursor.
+	// CursorBlink is ?12. Tracked and reported, but the cursor blinks as
+	// DECSCUSR or the user's setting says: programs set ?12 on the way in and
+	// out without meaning much by it.
 	CursorBlink bool
+	// ApplicationKeypad is DECKPAM ("ESC =", or ?66): the numeric keypad
+	// sends escape sequences rather than digits, so a program can tell the
+	// keypad's 5 from the one above the letters.
+	ApplicationKeypad bool
 	// AltScreen reports that the alternate buffer is on screen (?1049). It is
 	// set by switching buffers, not written to directly.
 	AltScreen bool
@@ -105,6 +111,8 @@ func (s *Screen) setPrivateMode(p int, set bool) {
 		s.mode.CursorBlink = set
 	case 25: // DECTCEM - cursor visibility
 		s.mode.CursorVisible = set
+	case 66: // DECNKM - the keypad mode, as a mode
+		s.mode.ApplicationKeypad = set
 
 	// --- mouse reporting: which events, and in which encoding ---
 	case 1000:
@@ -176,6 +184,8 @@ func (s *Screen) modeState(p int, private bool) int {
 		return on(s.mode.CursorBlink)
 	case 25:
 		return on(s.mode.CursorVisible)
+	case 66:
+		return on(s.mode.ApplicationKeypad)
 	case 1000:
 		return on(s.mode.Mouse == MouseClick)
 	case 1002:
@@ -229,15 +239,18 @@ func (s *Screen) switchAlt(alt bool) {
 	s.mode.AltScreen = s.altActive
 }
 
-// setCursorStyle implements DECSCUSR, "ESC [ n SP q". 0 and 1 are a blinking
-// block, 2 a steady one, 3/4 underline, 5/6 bar.
+// setCursorStyle implements DECSCUSR, "ESC [ n SP q": 1 and 2 are a block,
+// 3 and 4 an underline, 5 and 6 a bar, the odd ones blinking. 0 hands the
+// cursor back to whatever the user set.
 func (s *Screen) setCursorStyle(n int) {
-	switch n {
-	case 0, 1, 2:
-		s.cursorStyle = CursorBlock
-	case 3, 4:
-		s.cursorStyle = CursorUnderline
-	case 5, 6:
-		s.cursorStyle = CursorBar
+	if n < 0 || n > 6 {
+		return
 	}
+	if n == 0 {
+		s.cursorStyle, s.cursorBlink, s.cursorChosen = CursorBlock, false, false
+		return
+	}
+	s.cursorStyle = [...]CursorStyle{CursorBlock, CursorBlock, CursorUnderline, CursorBar}[(n+1)/2]
+	s.cursorBlink = n%2 == 1
+	s.cursorChosen = true
 }

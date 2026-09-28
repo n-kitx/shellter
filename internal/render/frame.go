@@ -56,6 +56,10 @@ type Scroll struct {
 	Above, Visible, Total int
 	// Color is what the indicator is drawn in, at part opacity.
 	Color uint32
+	// Shown says the indicator should be drawn. When it is not, the pane
+	// still has history, and a pointer over its right edge brings the
+	// indicator up to be dragged, as a Mac overlay scroller does.
+	Shown bool
 }
 
 // Rect is a rectangle of character cells: row 0, column 0 is the top left of
@@ -127,9 +131,10 @@ func (c Cell) Text() string {
 	return string(c.Rune) + c.Comb
 }
 
-// Flags are the styles the renderer can actually draw. Blink and hidden are
-// resolved away earlier: hidden becomes "foreground equals background", and
-// blinking is simply not animated.
+// Flags are the styles the renderer draws. Hidden is resolved away earlier, as
+// "foreground equals background". Blink is kept so that the application can
+// find blinking text and hide it on the off beat, the same way; the window
+// never looks at it.
 type Flags uint8
 
 const (
@@ -137,6 +142,7 @@ const (
 	FlagItalic
 	FlagUnderline
 	FlagStrike
+	FlagBlink
 )
 
 // Has reports whether every flag in f is set.

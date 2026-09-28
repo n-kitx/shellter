@@ -37,6 +37,9 @@ font-family = "Fira Code"
 option-as-meta = true
 copy-on-select = yes
 bell = flash
+cursor-style = bar
+cursor-blink = on
+line-height = 1.25
 `)
 	nord, ok := theme.Get("nord")
 	if !ok {
@@ -54,6 +57,9 @@ bell = flash
 		OptionAsMeta:      true,
 		CopyOnSelect:      true,
 		Bell:              "flash",
+		CursorStyle:       "bar",
+		CursorBlink:       true,
+		LineHeight:        1.25,
 		themesDir:         Default().themesDir,
 	}
 	if cfg != want {
@@ -102,6 +108,10 @@ func TestBadValuesAreRejected(t *testing.T) {
 		"font-size = 0",
 		"font-size = 200",
 		"bell = loud",
+		"cursor-style = beam",
+		"cursor-blink = sometimes",
+		"line-height = 0.5",
+		"line-height = tall",
 		"copy-on-select = maybe",
 		"colour-scheme = dracula", // a real Ghostty setting, not one of ours
 		"tab-position left",
@@ -200,8 +210,8 @@ func TestCreateWritesAParseableTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an uncommented setting is invalid: %v", err)
 	}
-	if settings != 11 {
-		t.Fatalf("the template lists %d settings, want every one of the 11", settings)
+	if settings != 14 {
+		t.Fatalf("the template lists %d settings, want every one of the 14", settings)
 	}
 	if cfg != Default() {
 		t.Fatalf("the template's values are not the defaults: %+v", cfg)

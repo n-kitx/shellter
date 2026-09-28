@@ -34,7 +34,8 @@ func (g *GUI) selectWithMouse(p *pane, at render.Mouse, m render.Mouse, rows, co
 	switch m.Action {
 	case input.MousePress:
 		g.dragging = p
-		p.sel.begin(p.posAt(at.Row, at.Col, rows, cols), m.Clicks)
+		// Option+drag selects a rectangle, as in Terminal.app and iTerm.
+		p.sel.begin(p.posAt(at.Row, at.Col, rows, cols), m.Clicks, m.Mods.Has(input.ModOption))
 		p.snapSelection(cols)
 	case input.MouseMove:
 		if g.dragging != p {

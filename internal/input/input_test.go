@@ -231,3 +231,32 @@ func TestOptionAsMeta(t *testing.T) {
 		t.Errorf("without Option as Meta, Option+B = %q, want the composed ∫", got)
 	}
 }
+
+// In application keypad mode the keypad names its keys; otherwise it types
+// what is printed on them, and the rest of the keyboard is never affected.
+func TestApplicationKeypad(t *testing.T) {
+	app := Mode{ApplicationKeypad: true}
+	pad := func(r rune) Key { return Key{Chars: []rune{r}, Base: r, Keypad: true} }
+	for r, want := range map[rune]string{
+		'0': "\x1bOp", '5': "\x1bOu", '9': "\x1bOy", '.': "\x1bOn", '+': "\x1bOk",
+		'-': "\x1bOm", '*': "\x1bOj", '/': "\x1bOo", '=': "\x1bOX", 0x03: "\x1bOM",
+	} {
+		if got := string(Encode(pad(r), app)); got != want {
+			t.Errorf("keypad %q = %q, want %q", r, got, want)
+		}
+	}
+	if got := string(Encode(pad('5'), Mode{})); got != "5" {
+		t.Errorf("numeric mode: keypad 5 = %q", got)
+	}
+	if got := string(Encode(pad(0x03), Mode{})); got != "\r" {
+		t.Errorf("numeric mode: keypad Enter = %q", got)
+	}
+	if got := string(Encode(Key{Chars: []rune{'5'}, Base: '5'}, app)); got != "5" {
+		t.Errorf("the 5 above the letters = %q", got)
+	}
+	ctrl := pad('5')
+	ctrl.Mods = ModControl
+	if got := string(Encode(ctrl, app)); got == "\x1bOu" {
+		t.Errorf("Ctrl+keypad 5 sent the application sequence")
+	}
+}

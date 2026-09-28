@@ -32,7 +32,7 @@ func TestAnEmptySelectionSelectsNothing(t *testing.T) {
 	if !s.empty() {
 		t.Fatal("a zero selection should be empty")
 	}
-	s.begin(at(3, 4), 1)
+	s.begin(at(3, 4), 1, false)
 	if !s.empty() {
 		t.Fatal("a click with no drag selects nothing")
 	}
@@ -44,7 +44,7 @@ func TestAnEmptySelectionSelectsNothing(t *testing.T) {
 
 func TestBoundsPutTheSelectionInReadingOrder(t *testing.T) {
 	var s selection
-	s.begin(at(5, 2), 1)
+	s.begin(at(5, 2), 1, false)
 	s.extend(at(2, 7)) // dragged upwards
 
 	from, to := s.bounds()
@@ -55,7 +55,7 @@ func TestBoundsPutTheSelectionInReadingOrder(t *testing.T) {
 
 func TestSpansCoverOnlyTheSelectedPartOfEachRow(t *testing.T) {
 	var s selection
-	s.begin(at(10, 3), 1)
+	s.begin(at(10, 3), 1, false)
 	s.extend(at(12, 5))
 
 	// A view showing lines 9..13.
@@ -87,7 +87,7 @@ func TestSpansAreEmptyWhenNothingIsSelected(t *testing.T) {
 // the window. Same selection, a view two lines further down, two rows higher.
 func TestScrollingMovesTheHighlightNotTheSelection(t *testing.T) {
 	var s selection
-	s.begin(at(10, 0), 1)
+	s.begin(at(10, 0), 1, false)
 	s.extend(at(10, 4))
 
 	before := s.spansInto(nil, 8, 6, 20)

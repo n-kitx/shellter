@@ -24,6 +24,8 @@ static double gFontSize = 0;     // the size the fonts above are at now
 static double gBaseFontSize = 0; // the configured size, which Cmd+0 returns to
 static double gCharWidth = 0;  // advance width of one cell
 static double gLineHeight = 0; // height of one row
+static double gLineScale = 1;  // the line-height setting: rows are this much taller
+static double gTextInset = 0;  // how far text sits below a row's top, to centre it
 static NSView *gView = nil;      // the terminal grid
 static NSView *gTabBar = nil;    // the chrome beside or above it
 static NSView *gContent = nil;   // the container holding both
@@ -226,6 +228,15 @@ static NSPoint cellOrigin(int row, int col) {
     return NSMakePoint(gPad + col * gCharWidth, gPad + row * gLineHeight);
 }
 
+// textOrigin is where a glyph is drawn in a cell: its top, lowered by half of
+// whatever the line-height setting added, so text sits in the middle of a
+// taller row rather than at its top.
+static NSPoint textOrigin(int row, int col) {
+    NSPoint o = cellOrigin(row, col);
+    o.y += gTextInset;
+    return o;
+}
+
 // Text being composed by an input method - a Japanese reading before it is
 // converted, or the accent of a dead key waiting for its letter. It belongs to
 // the input method until it is committed, so it is drawn over the grid at the
@@ -248,6 +259,33 @@ static NSRect gDividers[kMaxDividers];
 static int gDividerCount = 0;
 static NSRect gCursorDividers[kMaxDividers]; // what the cursor rects were built from
 static int gCursorDividerCount = 0;
+
+// The scroll thumbs drawn in the last frame, one per pane showing one, so a
+// press on one can drag it. Rebuilt on every draw, like the dividers.
+typedef struct {
+    NSRect thumb;       // the thumb as drawn
+    NSRect track;       // the strip it moves in, a little wider to be easy to hit
+    int row, col;       // the pane's top-left cell, which names it to Go
+    int visible, total; // what the thumb's size and range were worked out from
+} Thumb;
+enum { kMaxThumbs = 16 };
+static Thumb gThumbs[kMaxThumbs];
+static int gThumbCount = 0;
+// The pane whose scroll track the pointer is over, or is dragging the thumb
+// of, by its top-left cell; row -1 for none. Its thumb comes up even when Go
+// has put it away, and widens, so there is something to take hold of.
+static int gThumbHoverRow = -1, gThumbHoverCol = -1;
+static BOOL gThumbDragging = NO;
+
+// thumbAt is the index of the scroll track under p, or -1.
+static int thumbAt(NSPoint p) {
+    for (int i = 0; i < gThumbCount; i++) {
+        if (NSPointInRect(p, gThumbs[i].track)) {
+            return i;
+        }
+    }
+    return -1;
+}
 
 // The drag being auto-scrolled, and the timer repeating it. See autoScroll:.
 static NSEvent *gDragEvent = nil;
@@ -286,6 +324,7 @@ static NSTimer *gDragTimer = nil;
     // text call per span, then the cursor. Keeping the loop on the Go side
     // means the grid never has to be copied across the boundary.
     gDividerCount = 0;
+    gThumbCount = 0;
     shellterGoRender();
     [self drawMarkedText];
 
@@ -325,7 +364,7 @@ static NSTimer *gDragTimer = nil;
     NSPoint o = cellOrigin(gCursorRow, gCursorCol);
     [colorFromRGB(gCursorBG) setFill];
     NSRectFill(NSMakeRect(o.x, o.y, w, gLineHeight));
-    [text drawAtPoint:o withAttributes:attrs];
+    [text drawAtPoint:NSMakePoint(o.x, o.y + gTextInset) withAttributes:attrs];
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +381,20 @@ static BOOL isSpecialKey(NSEvent *event) {
     }
     unichar c = [base characterAtIndex:0];
     return c < 0x20 || c == 0x7f || (c >= 0xF700 && c <= 0xF8FF);
+}
+
+// isKeypadKey reports whether a key is on the numeric keypad, by where it is
+// rather than what it types: the keypad's 5 and the 5 above the letters type
+// the same character, and a program in application keypad mode needs to know
+// which was pressed. The Clear key is left out - it is not a number.
+static BOOL isKeypadKey(NSEvent *event) {
+    switch ([event keyCode]) {
+    case 0x41: case 0x43: case 0x45: case 0x4B: case 0x4C: case 0x4E: case 0x51:
+    case 0x52: case 0x53: case 0x54: case 0x55: case 0x56: case 0x57: case 0x58:
+    case 0x59: case 0x5B: case 0x5C:
+        return YES;
+    }
+    return NO;
 }
 
 // keyDown: decides who a key belongs to.
@@ -362,7 +415,7 @@ static BOOL isSpecialKey(NSEvent *event) {
     // With Option as Meta, Option is a modifier for Go to encode, not a way to
     // compose a character, so the input system is kept out of it.
     BOOL meta = gOptionMeta && (mods & (1 << 2)) != 0;
-    if (![self hasMarkedText] && (command || meta ||
+    if (![self hasMarkedText] && (command || meta || isKeypadKey(event) ||
                                   (isSpecialKey(event) && [[event characters] length] > 0))) {
         [self sendKey:event];
         return;
@@ -393,6 +446,9 @@ static BOOL isSpecialKey(NSEvent *event) {
     }
 
     unsigned int mods = modsFromEvent(event);
+    if (isKeypadKey(event)) {
+        mods |= 1 << 4; // render.modKeypad: a fact about the key, for Go
+    }
 
     const char *charsUTF8 = [chars UTF8String];
     const char *baseUTF8 = [base UTF8String];
@@ -555,7 +611,52 @@ static NSString *plainString(id string) {
 // The mouse. AppKit delivers one selector per button and per phase; they all
 // funnel into the same report.
 - (void)mouseDown:(NSEvent *)event {
+    NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
+    int i = thumbAt(p);
+    if (i >= 0) {
+        [self dragThumb:gThumbs[i] from:p];
+        return;
+    }
     [self reportMouse:event button:kMouseLeft action:kMousePress];
+}
+
+// dragThumb follows the pointer with a scroll thumb until the button comes up,
+// telling Go how many lines of history should be above the view. Pressing the
+// track away from the thumb jumps the thumb's middle to the pointer first.
+- (void)dragThumb:(Thumb)t from:(NSPoint)p {
+    double th = NSHeight(t.thumb);
+    double grab = NSPointInRect(p, NSInsetRect(t.thumb, -4, 0)) ? p.y - NSMinY(t.thumb) : th / 2;
+    double range = NSHeight(t.track) - th;
+    int lines = t.total - t.visible;
+    gThumbDragging = YES;
+    gThumbHoverRow = t.row;
+    gThumbHoverCol = t.col;
+    NSEvent *e = nil;
+    do {
+        if (e != nil) {
+            p = [self convertPoint:[e locationInWindow] fromView:nil];
+        }
+        double frac = range > 0 ? (p.y - grab - NSMinY(t.track)) / range : 0;
+        frac = MAX(0, MIN(1, frac));
+        shellterGoScrollTo(t.row, t.col, (int)lround(frac * lines));
+        [self display]; // now: this loop keeps the run loop from getting to it
+        e = [[self window] nextEventMatchingMask:(NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp)];
+    } while ([e type] != NSEventTypeLeftMouseUp);
+    gThumbDragging = NO;
+    [self hoverThumb:[self convertPoint:[e locationInWindow] fromView:nil]];
+    [self setNeedsDisplay:YES];
+}
+
+// hoverThumb notes which scroll track, if any, the pointer is over, and
+// redraws when that changes.
+- (void)hoverThumb:(NSPoint)p {
+    int i = thumbAt(p);
+    int row = i >= 0 ? gThumbs[i].row : -1, col = i >= 0 ? gThumbs[i].col : -1;
+    if (row != gThumbHoverRow || col != gThumbHoverCol) {
+        gThumbHoverRow = row;
+        gThumbHoverCol = col;
+        [self setNeedsDisplay:YES];
+    }
 }
 - (void)mouseUp:(NSEvent *)event {
     [self stopAutoScroll];
@@ -629,6 +730,7 @@ static NSString *plainString(id string) {
     if (gTracking != nil) {
         [self reportMouse:event button:kMouseNone action:kMouseMove];
     }
+    [self hoverThumb:[self convertPoint:[event locationInWindow] fromView:nil]];
     [self reportHover:event];
 }
 
@@ -639,6 +741,7 @@ static NSString *plainString(id string) {
 }
 
 - (void)mouseExited:(NSEvent *)event {
+    [self hoverThumb:NSMakePoint(-1, -1)];
     shellterGoHover(-1, -1, 0);
 }
 
@@ -1473,6 +1576,66 @@ static void titlebarDoubleClicked(NSWindow *window) {
 
 @end
 
+// ShellterBarButton is a borderless symbol button that answers the pointer the
+// way the tab bar's buttons do: a rounded backing under it while hovered,
+// darker while pressed.
+@interface ShellterBarButton : NSButton
+@end
+
+@implementation ShellterBarButton {
+    BOOL _hover;
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    if (_hover || [[self cell] isHighlighted]) {
+        NSColor *c = [[self cell] isHighlighted] ? chromeEdge() : chromeButtonHoverBG();
+        [c setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect([self bounds], 1, 1)
+                                         xRadius:5
+                                         yRadius:5] fill];
+    }
+    [super drawRect:dirtyRect];
+}
+
+- (void)setHover:(BOOL)hover {
+    _hover = hover;
+    [self setContentTintColor:hover ? chromeText() : chromeDim()];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)mouseEntered:(NSEvent *)event {
+    [self setHover:YES];
+}
+
+- (void)mouseExited:(NSEvent *)event {
+    [self setHover:NO];
+}
+
+// Closing the bar from its own button leaves no exit behind; the hover goes
+// with it, or the button would be lit when the bar next opens.
+- (void)viewDidHide {
+    [super viewDidHide];
+    [self setHover:NO];
+}
+
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    for (NSTrackingArea *a in [self trackingAreas]) {
+        if ([a owner] == self) {
+            [self removeTrackingArea:a];
+        }
+    }
+    NSTrackingArea *area = [[[NSTrackingArea alloc]
+        initWithRect:[self bounds]
+             options:(NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow |
+                      NSTrackingInVisibleRect)
+               owner:self
+            userInfo:nil] autorelease];
+    [self addTrackingArea:area];
+}
+
+@end
+
 // findQuery is what the search field holds, as Go receives it.
 static void sendFind(int dir) {
     const char *q = [[gFindField stringValue] UTF8String];
@@ -1669,7 +1832,9 @@ static void setFontSize(double size) {
 
     gCharWidth = [@"M" sizeWithAttributes:@{NSFontAttributeName : gFont}].width;
     NSLayoutManager *layout = [[[NSLayoutManager alloc] init] autorelease];
-    gLineHeight = [layout defaultLineHeightForFont:gFont];
+    double natural = [layout defaultLineHeightForFont:gFont];
+    gLineHeight = round(natural * gLineScale);
+    gTextInset = floor((gLineHeight - natural) / 2);
 }
 
 // zoomText changes the font size and keeps the window where it is: the grid
@@ -2134,9 +2299,10 @@ static void installMenu(id target) {
 }
 
 void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
-                 double fontSize, double padding, double opacity, int blur,
-                 unsigned int background) {
+                 double fontSize, double lineHeight, double padding, double opacity,
+                 int blur, unsigned int background) {
     @autoreleasepool {
+        gLineScale = lineHeight > 0 ? lineHeight : 1;
         gPad = padding;
         gOpacity = opacity;
         gChromeRGB = background;
@@ -2251,9 +2417,9 @@ void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
         for (int i = 0; i < 3; i++) {
             NSImage *img = [NSImage imageWithSystemSymbolName:buttons[i].symbol
                                      accessibilityDescription:buttons[i].tip];
-            NSButton *b = [NSButton buttonWithImage:img target:nil action:buttons[i].action];
+            NSButton *b = [ShellterBarButton buttonWithImage:img target:nil action:buttons[i].action];
             [b setBordered:NO];
-            [b setContentTintColor:chromeText()];
+            [b setContentTintColor:chromeDim()];
             [b setToolTip:buttons[i].tip];
             [b setRefusesFirstResponder:YES];
             [b setFrame:NSMakeRect(kFindWidth - 90 + i * 28, 5, 26, 24)];
@@ -2522,7 +2688,7 @@ void shellterDrawText(int row, int col, const char *utf8, int len,
     if (flags & kFlagStrike) {
         attrs[NSStrikethroughStyleAttributeName] = @(NSUnderlineStyleSingle);
     }
-    [text drawAtPoint:cellOrigin(row, col) withAttributes:attrs];
+    [text drawAtPoint:textOrigin(row, col) withAttributes:attrs];
 }
 
 // The cursor is drawn last, over the text.
@@ -2558,7 +2724,7 @@ void shellterDrawCursor(int row, int col, int width, const char *utf8, int len,
     if (text == nil) {
         return;
     }
-    [text drawAtPoint:NSMakePoint(x, y)
+    [text drawAtPoint:NSMakePoint(x, y + gTextInset)
        withAttributes:@{
            NSFontAttributeName : gFont,
            NSForegroundColorAttributeName : colorFromRGB(bg),
@@ -2569,7 +2735,8 @@ void shellterDrawCursor(int row, int col, int width, const char *utf8, int len,
 // Settings changed while running
 // ---------------------------------------------------------------------------
 
-void shellterSetFont(const char *family, double size) {
+void shellterSetFont(const char *family, double size, double lineHeight) {
+    gLineScale = lineHeight > 0 ? lineHeight : 1;
     NSString *name = (family != NULL && *family != 0) ? [NSString stringWithUTF8String:family] : @"Menlo";
     [gFontName release];
     gFontName = [name retain];
@@ -2637,18 +2804,44 @@ static NSRect paneArea(int row, int col, int rows, int cols) {
 // scroller: in the padding beside the text where there is room for it,
 // otherwise just inside the pane's right edge.
 void shellterDrawScrollbar(int row, int col, int rows, int cols, int above,
-                           int visible, int total, unsigned int rgb) {
+                           int visible, int total, unsigned int rgb, int shown) {
     NSRect cells = cellRect(row, col, rows, cols);
     NSRect area = paneArea(row, col, rows, cols);
     double w = 5;
     double room = NSMaxX(area) - NSMaxX(cells);
-    double x = room >= w + 4 ? NSMaxX(cells) + (room - w) / 2 : NSMaxX(cells) - w - 2;
+    double mid = room >= w + 4 ? NSMaxX(cells) + room / 2 : NSMaxX(cells) - w / 2 - 2;
 
     double h = NSHeight(cells);
     double th = MIN(h, MAX(h * visible / total, 24));
     double ty = NSMinY(cells) + (h - th) * above / MAX(total - visible, 1);
-    [[colorFromRGB(rgb) colorWithAlphaComponent:0.4] setFill];
-    [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(x, ty, w, th) xRadius:w / 2 yRadius:w / 2] fill];
+    // The track is what the pointer finds: a strip wider than the thumb, out
+    // to the pane's edge, so the thumb need not be hit to the pixel.
+    NSRect track = NSMakeRect(mid - w / 2 - 5, NSMinY(cells), 0, h);
+    track.size.width = MAX(NSMaxX(area), mid + w / 2 + 5) - NSMinX(track);
+    if (gThumbCount < kMaxThumbs) {
+        gThumbs[gThumbCount++] = (Thumb){
+            .thumb = NSMakeRect(mid - w / 2, ty, w, th),
+            .track = track,
+            .row = row, .col = col, .visible = visible, .total = total,
+        };
+    }
+
+    // Under the pointer the thumb comes up whether or not Go has put it away,
+    // widens and darkens, over a faint groove - the Mac's overlay scroller.
+    BOOL hot = row == gThumbHoverRow && col == gThumbHoverCol;
+    if (!shown && !hot) {
+        return;
+    }
+    NSColor *c = colorFromRGB(rgb);
+    if (hot) {
+        w = 8;
+        NSRect groove = NSMakeRect(mid - w / 2 - 1, NSMinY(cells), w + 2, h);
+        [[c colorWithAlphaComponent:0.08] setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:groove xRadius:w / 2 + 1 yRadius:w / 2 + 1] fill];
+    }
+    NSRect thumb = NSMakeRect(mid - w / 2, ty, w, th);
+    [[c colorWithAlphaComponent:gThumbDragging && hot ? 0.75 : hot ? 0.6 : 0.4] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:thumb xRadius:w / 2 yRadius:w / 2] fill];
 }
 
 void shellterFlash(int row, int col, int rows, int cols, unsigned int rgb) {

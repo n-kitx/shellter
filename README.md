@@ -754,6 +754,8 @@ see, so that switching to one never shows a grid of the wrong shape.
 | drag | select; double click for a word, triple for a line |
 | `Shift`+drag | select even while a program has asked for the mouse |
 | drag past the top or bottom | keep selecting, scrolling through history |
+| `Option`+drag | select a rectangle: the same columns of every line |
+| drag the scroll thumb | scroll through history; click the track to jump (hover the right edge to bring it up) |
 | right click / `Ctrl`+click | Copy, Paste, Select All, Split, Clear |
 | drop files on the window | type their paths, escaped for the shell |
 | drag the sidebar's edge | make the tab sidebar wider or narrower (120–480 pt) |
@@ -1169,6 +1171,14 @@ copy-on-select = true
 
 # what a program ringing the bell does: sound, flash, both or off
 bell = flash
+
+# the cursor a program gets until it asks for its own (vim's bar in insert
+# mode); ESC [ 0 SP q hands it back
+cursor-style = bar
+cursor-blink = true
+
+# rows 1.2 times the font's own spacing, text centred in them
+line-height = 1.2
 ```
 
 Whatever `bell` says, a bell in a background tab puts a bell on that tab until

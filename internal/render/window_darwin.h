@@ -10,12 +10,13 @@
 // the text, opacity how solid the window is, and blur whether to frost what
 // shows through a translucent one.
 void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
-                 double fontSize, double padding, double opacity, int blur,
-                 unsigned int background);
+                 double fontSize, double lineHeight, double padding, double opacity,
+                 int blur, unsigned int background);
 
 // shellterSetFont and shellterSetChrome change the font and the window's dress
-// while it is open. Main thread only.
-void shellterSetFont(const char *family, double size);
+// while it is open. lineHeight scales the rows: 1 is the font's own spacing.
+// Main thread only.
+void shellterSetFont(const char *family, double size, double lineHeight);
 void shellterSetChrome(double padding, double opacity, int blur, unsigned int background);
 
 // shellterSetOptionAsMeta says whether Option+key is passed on unmodified, as
@@ -112,8 +113,9 @@ void shellterDrawDivider(int row, int col, int rows, int cols);
 void shellterDrawCursor(int row, int col, int width, const char *utf8, int len, unsigned int fg, unsigned int bg, int style);
 // shellterDrawScrollbar draws a pane's scroll indicator: a thumb along its
 // right edge, placed by how many of total lines are above the visible ones.
+// When shown is false it is drawn only while the pointer is over it.
 void shellterDrawScrollbar(int row, int col, int rows, int cols, int above,
-                           int visible, int total, unsigned int rgb);
+                           int visible, int total, unsigned int rgb, int shown);
 // shellterFlash washes a pane in a colour, for the visual bell.
 void shellterFlash(int row, int col, int rows, int cols, unsigned int rgb);
 

@@ -81,18 +81,18 @@ func Run(cfg Config) error {
 
 	// Blocks in [NSApp run] until shellterStop is called.
 	C.shellterRun(title, C.int(cfg.Rows), C.int(cfg.Cols), family, C.double(cfg.FontSize),
-		C.double(cfg.Chrome.Padding), C.double(cfg.Chrome.Opacity), blur,
+		C.double(cfg.LineHeight), C.double(cfg.Chrome.Padding), C.double(cfg.Chrome.Opacity), blur,
 		C.uint(cfg.Chrome.Background))
 	return nil
 }
 
-// SetFont changes the terminal font while the window is open: the family, and
-// the size Cmd+0 goes back to. The window keeps its size and the grid gains or
-// loses cells. Main thread only - see Post.
-func SetFont(family string, size float64) {
+// SetFont changes the terminal font while the window is open: the family, the
+// size Cmd+0 goes back to, and the line height. The window keeps its size and
+// the grid gains or loses cells. Main thread only - see Post.
+func SetFont(family string, size, lineHeight float64) {
 	f := C.CString(family)
 	defer C.free(unsafe.Pointer(f))
-	C.shellterSetFont(f, C.double(size))
+	C.shellterSetFont(f, C.double(size), C.double(lineHeight))
 }
 
 // SetChrome changes how the window is dressed while it is open: padding,
@@ -427,8 +427,12 @@ func drawPane(p Pane, defaultBG uint32, faded bool) {
 func drawOverlays(p Pane) {
 	r := p.Rect
 	if sc := p.Scroll; sc.Total > sc.Visible && sc.Visible > 0 {
+		var shown C.int
+		if sc.Shown {
+			shown = 1
+		}
 		C.shellterDrawScrollbar(C.int(r.Row), C.int(r.Col), C.int(r.Rows), C.int(r.Cols),
-			C.int(sc.Above), C.int(sc.Visible), C.int(sc.Total), C.uint(sc.Color))
+			C.int(sc.Above), C.int(sc.Visible), C.int(sc.Total), C.uint(sc.Color), shown)
 	}
 	if p.Flash {
 		C.shellterFlash(C.int(r.Row), C.int(r.Col), C.int(r.Rows), C.int(r.Cols), C.uint(p.FlashColor))
@@ -637,6 +641,16 @@ func shellterGoPaneToTab() {
 func shellterGoHover(row, col C.int, mods C.uint) {
 	if cfg := config(); cfg != nil && cfg.OnHover != nil {
 		cfg.OnHover(int(row), int(col), input.Modifiers(mods))
+	}
+}
+
+// shellterGoScrollTo reports a scroll thumb dragged: the pane whose top-left
+// cell is row, col should have above lines of history above its view.
+//
+//export shellterGoScrollTo
+func shellterGoScrollTo(row, col, above C.int) {
+	if cfg := config(); cfg != nil && cfg.OnScrollTo != nil {
+		cfg.OnScrollTo(int(row), int(col), int(above))
 	}
 }
 

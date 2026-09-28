@@ -165,8 +165,8 @@ func TestScrollIndicator(t *testing.T) {
 	history(p, 30)
 	g.draw()
 	p.scrolledAt = time.Time{} // long ago
-	if sc := g.draw().Panes[0].Scroll; sc != (render.Scroll{}) {
-		t.Fatalf("at the live screen, an indicator: %+v", sc)
+	if sc := g.draw().Panes[0].Scroll; sc.Shown || sc.Total == 0 {
+		t.Fatalf("at the live screen, want an indicator ready but not shown: %+v", sc)
 	}
 
 	p.scr.ScrollBy(4)
@@ -176,16 +176,16 @@ func TestScrollIndicator(t *testing.T) {
 		t.Fatalf("scrolled back 4: %+v (history %d)", sc, hist)
 	}
 	p.scrolledAt = time.Time{}
-	if g.draw().Panes[0].Scroll == (render.Scroll{}) {
+	if !g.draw().Panes[0].Scroll.Shown {
 		t.Fatal("the indicator went while the view is still in history")
 	}
 
 	p.scr.ScrollToBottom()
-	if g.draw().Panes[0].Scroll == (render.Scroll{}) {
+	if !g.draw().Panes[0].Scroll.Shown {
 		t.Fatal("the indicator went the moment the view came back")
 	}
 	p.scrolledAt = time.Time{}
-	if sc := g.draw().Panes[0].Scroll; sc != (render.Scroll{}) {
+	if sc := g.draw().Panes[0].Scroll; sc.Shown {
 		t.Fatalf("the indicator lingered: %+v", sc)
 	}
 
@@ -240,5 +240,73 @@ func TestParseBell(t *testing.T) {
 		if got := ParseBell(in); got != want {
 			t.Errorf("ParseBell(%q) = %v", in, got)
 		}
+	}
+}
+
+const optionKey = input.ModOption
+
+// Dragging the thumb puts the asked-for amount of history above the view.
+func TestScrollTo(t *testing.T) {
+	g := newTestGUI(5, 20)
+	p := g.current()
+	history(p, 30)
+	hist := p.scr.ScrollbackLen()
+
+	g.scrollTo(0, 0, 0)
+	if p.scr.ScrollOffset() != hist {
+		t.Fatalf("to the top: offset %d, want %d", p.scr.ScrollOffset(), hist)
+	}
+	g.scrollTo(0, 0, hist-3)
+	if p.scr.ScrollOffset() != 3 {
+		t.Fatalf("offset %d, want 3", p.scr.ScrollOffset())
+	}
+	g.scrollTo(0, 0, hist+50)
+	if p.scr.ScrollOffset() != 0 {
+		t.Fatalf("past the bottom: offset %d", p.scr.ScrollOffset())
+	}
+}
+
+// Option+drag selects the same columns of every line.
+func TestBlockSelection(t *testing.T) {
+	g := newTestGUI(5, 20)
+	p := g.current()
+	feedPane(p, "id  name\r\n1   alpha\r\n22  b\r\n")
+
+	g.mouse(render.Mouse{Action: mousePress, Row: 0, Col: 4, Clicks: 1, Mods: optionKey})
+	g.mouse(render.Mouse{Action: mouseMove, Row: 2, Col: 9, Mods: optionKey})
+	g.mouse(render.Mouse{Action: mouseRelease, Row: 2, Col: 9, Mods: optionKey})
+	if got := p.sel.text(p.scr); got != "name\nalpha\nb" {
+		t.Fatalf("block = %q", got)
+	}
+	spans := p.sel.spansInto(nil, p.scr.TopLine(), 5, 20)
+	for r := 0; r < 3; r++ {
+		if spans[r] != (span{from: 4, to: 9}) {
+			t.Fatalf("row %d highlights %+v", r, spans[r])
+		}
+	}
+	if !spans[3].empty() {
+		t.Fatal("a row below the block is highlighted")
+	}
+
+	// Dragged right to left, it is the same rectangle.
+	g.mouse(render.Mouse{Action: mousePress, Row: 2, Col: 9, Clicks: 1, Mods: optionKey})
+	g.mouse(render.Mouse{Action: mouseMove, Row: 0, Col: 4, Mods: optionKey})
+	if got := p.sel.text(p.scr); got != "name\nalpha\nb" {
+		t.Fatalf("backwards block = %q", got)
+	}
+}
+
+// The keypad names its keys to a full-screen program that asked, and types
+// digits at a shell prompt even when the shell's setup asked too.
+func TestKeypadModeOnlyOnTheAlternateScreen(t *testing.T) {
+	g := newTestGUI(5, 20)
+	five := input.Key{Chars: []rune{'5'}, Base: '5', Keypad: true}
+	g.feed("\x1b[?1h\x1b=") // oh-my-zsh's smkx, at the prompt
+	if got := string(g.encode(five)); got != "5" {
+		t.Fatalf("at the prompt, keypad 5 = %q", got)
+	}
+	g.feed("\x1b[?1049h") // vim
+	if got := string(g.encode(five)); got != "\x1bOu" {
+		t.Fatalf("in a full-screen program, keypad 5 = %q", got)
 	}
 }

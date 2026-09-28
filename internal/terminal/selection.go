@@ -40,6 +40,9 @@ type selection struct {
 	// head follows the pointer and may be either side of anchor.
 	anchor, head screen.Pos
 	mode         selectMode
+	// block makes the selection a rectangle - the same columns of every line
+	// between anchor and head - rather than a run of text. Option+drag.
+	block bool
 	// active distinguishes "nothing selected" from "an empty selection at the
 	// place that was clicked", which is what a click with no drag produces.
 	active bool
@@ -84,9 +87,14 @@ func (s *selection) spansInto(dst []span, top int64, rows, cols int) []span {
 	}
 
 	from, to := s.bounds()
+	left, right := s.columns()
 	for r := 0; r < rows; r++ {
 		line := top + int64(r)
 		if line < from.Line || line > to.Line {
+			continue
+		}
+		if s.block {
+			dst[r] = span{from: clampInt(left, 0, cols), to: clampInt(right, 0, cols)}
 			continue
 		}
 		sp := span{from: 0, to: cols}
@@ -107,7 +115,21 @@ func (s *selection) text(scr *screen.Screen) string {
 		return ""
 	}
 	from, to := s.bounds()
+	if s.block {
+		left, right := s.columns()
+		return scr.BlockText(from.Line, to.Line, left, right)
+	}
 	return scr.Text(from, to)
+}
+
+// columns is a block selection's left and right edges, whichever way it was
+// dragged: from the leftmost column to one past the rightmost.
+func (s *selection) columns() (left, right int) {
+	left, right = s.anchor.Col, s.head.Col
+	if right < left {
+		left, right = right, left
+	}
+	return left, right
 }
 
 // ---------------------------------------------------------------------------
@@ -115,8 +137,9 @@ func (s *selection) text(scr *screen.Screen) string {
 // ---------------------------------------------------------------------------
 
 // begin starts a selection at a position. clicks is 1 for a plain drag, 2 to
-// select whole words and 3 for whole lines.
-func (s *selection) begin(at screen.Pos, clicks int) {
+// select whole words and 3 for whole lines; block makes a plain drag select a
+// rectangle.
+func (s *selection) begin(at screen.Pos, clicks int, block bool) {
 	mode := selectChar
 	switch {
 	case clicks >= 3:
@@ -124,7 +147,8 @@ func (s *selection) begin(at screen.Pos, clicks int) {
 	case clicks == 2:
 		mode = selectWord
 	}
-	*s = selection{origin: at, anchor: at, head: at, mode: mode, active: true}
+	*s = selection{origin: at, anchor: at, head: at, mode: mode, active: true,
+		block: block && mode == selectChar}
 }
 
 // extend moves the far end of the selection to a position. The near end goes

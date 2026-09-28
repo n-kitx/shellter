@@ -162,8 +162,8 @@ func selected(sel []span, row, col int) bool {
 	return col >= sp.from && col < sp.to
 }
 
-// renderFlags keeps only the styles the renderer draws. Blink is dropped
-// deliberately: nothing here animates.
+// renderFlags keeps the styles the renderer draws, and blink, which the GUI
+// animates (blink.go).
 func renderFlags(f screen.Flags) render.Flags {
 	var out render.Flags
 	if f.Has(screen.FlagBold) {
@@ -177,6 +177,9 @@ func renderFlags(f screen.Flags) render.Flags {
 	}
 	if f.Has(screen.FlagStrike) {
 		out |= render.FlagStrike
+	}
+	if f.Has(screen.FlagBlink) {
+		out |= render.FlagBlink
 	}
 	return out
 }

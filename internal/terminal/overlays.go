@@ -60,6 +60,22 @@ func (g *GUI) flash(rp *render.Pane, p *pane) {
 // The scroll indicator
 // ---------------------------------------------------------------------------
 
+// scrollTo is the thumb being dragged: the pane whose top-left cell is row,
+// col should have above lines of its history above the view.
+func (g *GUI) scrollTo(row, col, above int) {
+	p, _ := g.paneAt(row, col)
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	history := p.scr.ScrollbackLen()
+	moved := p.scr.ScrollBy(clamp(history-above, 0, history) - p.scr.ScrollOffset())
+	p.mu.Unlock()
+	if moved {
+		render.Redraw()
+	}
+}
+
 // scrollLinger is how long the indicator stays after the view stops moving,
 // once it is back at the live screen.
 const scrollLinger = time.Second
@@ -67,7 +83,8 @@ const scrollLinger = time.Second
 // scrollIndicator says where the view is in the pane's history. It shows
 // whenever the view is scrolled back - so that it is always clear the screen
 // being looked at is not the live one - and for a moment after any scroll.
-// A full-screen program has no history to place, and gets none.
+// Otherwise it is there but not Shown: the window brings it up under the
+// pointer. A full-screen program has no history to place, and gets none.
 func (g *GUI) scrollIndicator(rp *render.Pane, p *pane, snap screen.Snapshot, alt bool) {
 	now := time.Now()
 	if snap.ScrollOffset != p.scrollOffset {
@@ -78,13 +95,11 @@ func (g *GUI) scrollIndicator(rp *render.Pane, p *pane, snap screen.Snapshot, al
 	if alt || snap.ScrollbackLen == 0 {
 		return
 	}
-	if snap.ScrollOffset == 0 && now.Sub(p.scrolledAt) >= scrollLinger {
-		return
-	}
 	rp.Scroll = render.Scroll{
 		Above:   snap.ScrollbackLen - snap.ScrollOffset,
 		Visible: snap.Rows,
 		Total:   snap.ScrollbackLen + snap.Rows,
 		Color:   g.Palette.Foreground,
+		Shown:   snap.ScrollOffset != 0 || now.Sub(p.scrolledAt) < scrollLinger,
 	}
 }
