@@ -40,7 +40,10 @@ rather than rediscovering the state by reading the code.
       `pty.Foreground` (TIOCGPGRP) vs the shell's pid, `shell.Session.Running`.
 - [x] Remember window size and position (frame autosave), the sidebar width
       and the zoom (NSUserDefaults). A zoom is dropped if font-size changes.
-- [ ] Session restore after quit.
+- [x] Session restore after quit (`restore-session`, default on): tabs, names,
+      splits and ratios, focus, each pane's directory and last 2,000 lines
+      with colours, into ~/Library/Application Support/Shellter/session.json.
+      Running programs do not come back; closing the last tab starts fresh.
 - [x] Double click on the title strip zooms / minimises per System Settings.
 - [x] Sidebar width is draggable (120-480 pt), and remembered.
 

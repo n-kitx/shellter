@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/thakurankit7/shellter/internal/input"
 	"github.com/thakurankit7/shellter/internal/pty"
@@ -59,6 +60,10 @@ type GUI struct {
 	CursorStyle render.CursorStyle
 	CursorBlink bool
 	LineHeight  float64
+	// RestoreSession saves what is open on quit and reopens it at the next
+	// start, in the file at SessionPath; "" keeps no session. See session.go.
+	RestoreSession bool
+	SessionPath    string
 	// Reload reads the settings again, file and flags, for when the file
 	// changes; ThemesDir is where theme files live, so that editing one
 	// counts as a change too. Without Reload, settings are read once.
@@ -125,6 +130,10 @@ type GUI struct {
 	typedAt       atomic.Int64
 	windowFocused atomic.Bool
 
+	// quitting is set once the user has agreed to quit or close the window,
+	// and the session has been saved.
+	quitting atomic.Bool
+
 	// out, when set, replaces the active tab's PTY as the destination for
 	// encoded input. Tests set it; nothing else does.
 	out io.Writer
@@ -154,11 +163,15 @@ func (g *GUI) Run() (int, error) {
 	g.rows, g.cols = int(g.Config.Size.Rows), int(g.Config.Size.Cols)
 	g.lastRows, g.lastCols = g.rows, g.cols
 
-	first, err := g.openTab()
-	if err != nil {
-		return -1, err
+	if !g.restoreSession() {
+		if _, err := g.openTab(); err != nil {
+			return -1, err
+		}
 	}
-	firstPane := first.focus
+	g.mu.Lock()
+	first := firstPane(g.tabs[0].root)
+	active := g.active
+	g.mu.Unlock()
 
 	stop := make(chan struct{})
 	go g.watchSettings(stop)
@@ -175,7 +188,7 @@ func (g *GUI) Run() (int, error) {
 		Cols:          g.cols,
 		Chrome:        g.chrome(),
 		Tabs:          g.tabViews(),
-		ActiveTab:     0,
+		ActiveTab:     active,
 		TabPosition:   g.TabPosition,
 		Draw:          g.draw,
 		OnKey:         g.key,
@@ -207,15 +220,20 @@ func (g *GUI) Run() (int, error) {
 		CanQuit:       g.canQuit,
 	})
 
-	// The window is gone; make sure no shell outlives it.
+	// The window is gone. When it went because the last tab closed, the next
+	// start is a fresh one; a quit saved the session on its way out (canQuit).
+	if !g.quitting.Load() {
+		g.forgetSession()
+	}
+	// Make sure no shell outlives it.
 	g.closeWindow()
-	code, waitErr := firstPane.sess.Wait()
+	code, waitErr := first.sess.Wait()
 
 	switch {
 	case runErr != nil:
 		return -1, runErr
-	case firstPane.readErr != nil:
-		return code, firstPane.readErr
+	case first.readErr != nil:
+		return code, first.readErr
 	default:
 		return code, waitErr
 	}
@@ -468,7 +486,7 @@ func (g *GUI) panePrinted(tb *tab, p *pane) {
 	g.mu.Lock()
 	front := g.active < len(g.tabs) && g.tabs[g.active] == tb
 	changed := false
-	if !front && !tb.activity {
+	if !front && !tb.activity && time.Now().After(tb.quietUntil) {
 		tb.activity = true // light the dot: something happened over there
 		changed = true
 	}

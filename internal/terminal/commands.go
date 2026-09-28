@@ -92,7 +92,15 @@ func runningDetail(names []string) string {
 
 // canQuit is asked before the window closes or the app quits.
 func (g *GUI) canQuit() bool {
-	return g.okToClose(g.allPanes(), "Quit Shellter?", "Quit")
+	if !g.okToClose(g.allPanes(), "Quit Shellter?", "Quit") {
+		return false
+	}
+	// The last moment everything is still open: once AppKit has its answer it
+	// may end the process without returning to Run.
+	if !g.quitting.Swap(true) {
+		g.saveSession()
+	}
+	return true
 }
 
 // allPanes is every pane in every tab.

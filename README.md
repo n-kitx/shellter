@@ -1179,6 +1179,9 @@ cursor-blink = true
 
 # rows 1.2 times the font's own spacing, text centred in them
 line-height = 1.2
+
+# reopen the tabs, splits and text you quit with (the default)
+restore-session = true
 ```
 
 Whatever `bell` says, a bell in a background tab puts a bell on that tab until
@@ -1199,6 +1202,17 @@ position, the zoom set with Cmd+= and Cmd+-, how wide the tab sidebar was
 dragged, and Shellter > Secure Keyboard Entry. They live in macOS's own preferences for the app. A zoom is kept only
 while `font-size` in the file stays what it was when you zoomed: change the
 file, and the file wins.
+
+Quitting, or closing the window, with tabs open saves the session to
+`~/Library/Application Support/Shellter/session.json`, and the next start
+brings it back: the tabs in order with their names, each tab's splits in their
+proportions, the tab and pane that had the focus, and in every pane the last
+2,000 lines of text with their colours, a faint "Restored session" line, and a
+new shell in the directory the old one was in. What was running does not come
+back - the processes are gone - and a full-screen program's screen is left
+out. Closing the last tab yourself (or `exit` in it) starts the next session
+fresh. The file holds what was on screen, so it is readable only by you;
+`restore-session = false` stops saving it and removes it.
 
 `font-family` is the name Font Book shows. One that is not installed falls
 back to Menlo rather than failing: fonts are the Mac's business, not the

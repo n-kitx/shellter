@@ -171,3 +171,55 @@ func TestBlockText(t *testing.T) {
 		t.Fatalf("an upside-down block gave %q", got)
 	}
 }
+
+// A transcript replayed onto a new screen puts the same text back in the same
+// colours, and a wrapped line reflows to the new width.
+func TestTranscriptRoundTrip(t *testing.T) {
+	s := NewWithScrollback(3, 10, 100)
+	feed(s, "plain\r\n\x1b[1;31mbold red\x1b[0m\r\n\x1b[38;5;200mx\x1b[48;2;1;2;3my\x1b[0m\r\n")
+	feed(s, "0123456789abcde\r\n\x1b[96mbright\x1b[0m")
+	tr := s.Transcript(100)
+
+	n := NewWithScrollback(3, 20, 100)
+	feed(n, tr)
+	got := n.Text(Pos{Line: n.FirstLine()}, Pos{Line: n.TotalLines()})
+	want := "plain\nbold red\nxy\n0123456789abcde\nbright"
+	if got != want {
+		t.Fatalf("text came back as %q, want %q", got, want)
+	}
+	// "0123456789abcde" wrapped at 10; at 20 it is one line again.
+	if line := n.Line(1); line != "0123456789abcde" {
+		t.Errorf("the wrapped line did not reflow: %q", line)
+	}
+	cell := func(row, col int) Cell { return n.Cell(row, col) }
+	find := func(text string) int {
+		for r := 0; r < 3; r++ {
+			if strings.HasPrefix(n.Line(r), text) {
+				return r
+			}
+		}
+		return -1
+	}
+	if r := find("bright"); r < 0 || cell(r, 0).Attr.FG != Indexed(14) {
+		t.Errorf("bright cyan did not survive")
+	}
+	if tr := s.Transcript(2); strings.Contains(tr, "plain") || !strings.Contains(tr, "bright") {
+		t.Errorf("a two-line transcript kept %q", tr)
+	}
+
+	// Styles, 256 colours and RGB, checked on a screen tall enough to hold it.
+	m := NewWithScrollback(10, 20, 100)
+	feed(m, s.Transcript(100))
+	if c := m.Cell(1, 0); !c.Attr.Flags.Has(FlagBold) || c.Attr.FG != Indexed(1) {
+		t.Errorf("bold red came back as %+v", c.Attr)
+	}
+	if c := m.Cell(2, 0); c.Attr.FG != Indexed(200) {
+		t.Errorf("colour 200 came back as %+v", c.Attr)
+	}
+	if c := m.Cell(2, 1); c.Attr.BG != RGB(1, 2, 3) {
+		t.Errorf("an RGB background came back as %+v", c.Attr)
+	}
+	if c := m.Cell(0, 0); c.Attr != (Attr{}) {
+		t.Errorf("plain text came back styled: %+v", c.Attr)
+	}
+}

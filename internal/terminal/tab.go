@@ -1,5 +1,7 @@
 package terminal
 
+import "time"
+
 // A tab is one or more panes sharing a rectangle of the window.
 //
 // The panes form a binary tree. A leaf is a pane; a branch is a split, which
@@ -31,6 +33,10 @@ type tab struct {
 	// rang says a program in this tab rang the bell while the tab was in the
 	// background. Cleared, like activity, when the tab is looked at.
 	rang bool
+	// quietUntil is when printing here starts to count as activity. A
+	// restored tab's shell starts up behind the one in front, and its first
+	// prompt is not news.
+	quietUntil time.Time
 
 	// name is what the user called the tab, or "" to name it after its shell.
 	// Guarded by the GUI's lock.

@@ -70,6 +70,9 @@ type Config struct {
 	CursorBlink bool
 	// LineHeight scales the rows: 1 is the font's own spacing.
 	LineHeight float64
+	// RestoreSession brings back the tabs, splits, directories and text that
+	// were open when Shellter last quit.
+	RestoreSession bool
 
 	// themesDir is where theme files are looked for: "themes" beside the
 	// settings file.
@@ -90,6 +93,7 @@ func Default() Config {
 		Bell:              "sound",
 		CursorStyle:       "block",
 		LineHeight:        1,
+		RestoreSession:    true,
 		themesDir:         themesBeside(Path()),
 	}
 }
@@ -163,6 +167,7 @@ func Create(path string) error {
 # cursor-style = %s    # block, underline or bar
 # cursor-blink = %t
 # line-height = %g    # 1 is the font's own spacing; 1.2 is a fifth taller
+# restore-session = %t    # reopen the tabs and text you quit with
 # bell = %s    # sound, flash, both or off
 # tab-position = %s    # top or left
 # background-opacity = %g    # 0 to 1
@@ -170,7 +175,7 @@ func Create(path string) error {
 # window-padding = %d
 # scrollback = %d
 `, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontFamily, d.FontSize, d.OptionAsMeta, d.CopyOnSelect,
-		d.CursorStyle, d.CursorBlink, d.LineHeight, d.Bell, d.TabPosition,
+		d.CursorStyle, d.CursorBlink, d.LineHeight, d.RestoreSession, d.Bell, d.TabPosition,
 		d.BackgroundOpacity, d.BackgroundBlur, d.WindowPadding, d.Scrollback)
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -243,6 +248,12 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("option-as-meta: %w", err)
 		}
 		c.OptionAsMeta = b
+	case "restore-session":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("restore-session: %w", err)
+		}
+		c.RestoreSession = b
 	case "copy-on-select":
 		b, err := parseBool(value)
 		if err != nil {
