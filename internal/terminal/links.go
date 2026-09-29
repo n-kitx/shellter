@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,7 +21,12 @@ import (
 
 // urlPattern is what counts as a URL: a scheme a browser or mail client
 // handles, or a bare www. address.
-var urlPattern = regexp.MustCompile(`^(?i)(https?://|ftp://|file://|mailto:|www\.)\S+$`)
+var urlPattern = regexp.MustCompile(`^(?i)(https?://|ftp://|mailto:|www\.)\S+$`)
+
+// fileURL is a file:// URL. It is not opened as a URL: it names a file on
+// this Mac, and goes through the same checks as a path does - above all
+// runnable, since `open file:///Applications/Calculator.app` would launch it.
+var fileURL = regexp.MustCompile(`^(?i)file://`)
 
 // lineSuffix is the ":line" or ":line:col" a compiler appends to a path.
 var lineSuffix = regexp.MustCompile(`(:\d+)+$`)
@@ -170,6 +176,13 @@ func linkTarget(token, dir string) (string, bool) {
 	}
 
 	path := lineSuffix.ReplaceAllString(token, "")
+	if fileURL.MatchString(path) {
+		u, err := url.Parse(path)
+		if err != nil || (u.Host != "" && u.Host != "localhost") || !filepath.IsAbs(u.Path) {
+			return "", false
+		}
+		path = u.Path
+	}
 	switch {
 	case path == "~" || strings.HasPrefix(path, "~/"):
 		home, err := os.UserHomeDir()

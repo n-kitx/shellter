@@ -103,6 +103,11 @@ func TestLinkTarget(t *testing.T) {
 		{"main.go:42:7", filepath.Join(dir, "main.go"), true},
 		{filepath.Join(dir, "main.go"), filepath.Join(dir, "main.go"), true},
 		{"missing.go", "", false},
+		// A file:// URL is a path, and gets a path's checks.
+		{"file://" + filepath.Join(dir, "main.go"), filepath.Join(dir, "main.go"), true},
+		{"file://localhost" + filepath.Join(dir, "main.go"), filepath.Join(dir, "main.go"), true},
+		{"file://" + filepath.Join(dir, "missing.go"), "", false},
+		{"file://elsewhere" + filepath.Join(dir, "main.go"), "", false},
 		{"hello", "", false},
 	}
 	for _, c := range cases {
@@ -129,6 +134,10 @@ func TestRunnableFilesAreNotOpened(t *testing.T) {
 	}
 	if runnable(text) {
 		t.Error("a text file was treated as runnable")
+	}
+	// The same file as a file:// URL must not slip past as "just a URL".
+	if target, ok := linkTarget("file://"+script, dir); !ok || !runnable(target) {
+		t.Errorf("file:// to an executable resolved to %q, %v, and would be opened", target, ok)
 	}
 }
 

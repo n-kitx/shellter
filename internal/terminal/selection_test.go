@@ -151,6 +151,10 @@ func TestPasteDropsControlCharacters(t *testing.T) {
 	if strings.ContainsRune(got, 0x1b) {
 		t.Fatal("an ESC survived the paste")
 	}
+	// U+009B is a one-character CSI; the accented letter after it is text.
+	if got := string(pasteBytes("a\u009b201~é", true)); got != "\x1b[200~a201~é\x1b[201~" {
+		t.Fatalf("paste = %q, want the C1 control gone and the text kept", got)
+	}
 }
 
 func TestPasteKeepsTabsAndText(t *testing.T) {

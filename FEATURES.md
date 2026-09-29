@@ -174,5 +174,9 @@ rather than rediscovering the state by reading the code.
 - [ ] Developer ID signing and notarisation (the bundle is ad-hoc signed, so
       Gatekeeper warns on any other Mac).
 - [ ] Universal (arm64 + x86_64) build.
+- [ ] Build with a current Go. govulncheck (2026-09-28) finds five standard
+      library issues reachable from go1.22.6 - url.Parse on OSC 7, LookPath
+      behind `open`, and three in os - all fixed by go1.25.8; no dependency
+      issue is reachable.
 - [ ] Auto-update (Sparkle), crash reporting.
 - [ ] `LICENSE` file.

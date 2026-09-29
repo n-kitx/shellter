@@ -781,26 +781,34 @@ static NSString *plainString(id string) {
 // paste and never cached.
 
 void shellterSetClipboard(const char *text, int len) {
-    NSString *s = [[[NSString alloc] initWithBytes:text
-                                            length:(NSUInteger)len
-                                          encoding:NSUTF8StringEncoding] autorelease];
-    if (s == nil) {
-        return;
+    // Called from Go threads, which have no autorelease pool that ever
+    // drains: without this one, every string made here would be kept.
+    @autoreleasepool {
+        NSString *s = [[[NSString alloc] initWithBytes:text
+                                                length:(NSUInteger)len
+                                              encoding:NSUTF8StringEncoding] autorelease];
+        if (s == nil) {
+            return;
+        }
+        NSPasteboard *pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        [pb writeObjects:@[s]];
     }
-    NSPasteboard *pb = [NSPasteboard generalPasteboard];
-    [pb clearContents];
-    [pb writeObjects:@[s]];
 }
 
 void shellterSetFindStatus(const char *status) {
-    NSString *text = [NSString stringWithUTF8String:status];
-    void (^apply)(void) = ^{
-      [gFindStatus setStringValue:text != nil ? text : @""];
-    };
-    if ([NSThread isMainThread]) {
-        apply();
-    } else {
-        dispatch_async(dispatch_get_main_queue(), apply);
+    // Called from Go threads, which have no autorelease pool that ever
+    // drains: without this one, every string made here would be kept.
+    @autoreleasepool {
+        NSString *text = [NSString stringWithUTF8String:status];
+        void (^apply)(void) = ^{
+          [gFindStatus setStringValue:text != nil ? text : @""];
+        };
+        if ([NSThread isMainThread]) {
+            apply();
+        } else {
+            dispatch_async(dispatch_get_main_queue(), apply);
+        }
     }
 }
 
@@ -2464,92 +2472,101 @@ void shellterRedraw(void) {
 }
 
 void shellterSetTitle(const char *title) {
-    // Copied now: the C string belongs to the Go caller, which is free to
-    // release it the moment this returns.
-    NSString *copy = [NSString stringWithUTF8String:title];
-    if (copy == nil) {
-        return;
+    // Called from Go threads, which have no autorelease pool that ever
+    // drains: without this one, every string made here would be kept.
+    @autoreleasepool {
+        // Copied now: the C string belongs to the Go caller, which is free to
+        // release it the moment this returns.
+        NSString *copy = [NSString stringWithUTF8String:title];
+        if (copy == nil) {
+            return;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          // The window still gets the title, for the Dock and the window menu,
+          // but the one a person sees is drawn in the strip.
+          [gWindow setTitle:copy];
+          [gTitle release];
+          gTitle = [copy retain];
+          [gContent setNeedsDisplay:YES];
+        });
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-      // The window still gets the title, for the Dock and the window menu,
-      // but the one a person sees is drawn in the strip.
-      [gWindow setTitle:copy];
-      [gTitle release];
-      gTitle = [copy retain];
-      [gContent setNeedsDisplay:YES];
-    });
 }
 
 void shellterSetTabs(const char *titles, int len, const char *busy,
                      const char *dirs, const char *bells, int count, int active,
                      int position) {
-    NSString *joined = (len > 0 && titles != NULL)
-                           ? [[[NSString alloc] initWithBytes:titles
-                                                       length:(NSUInteger)len
-                                                     encoding:NSUTF8StringEncoding] autorelease]
-                           : @"";
-    NSString *busyStr = (busy != NULL) ? [NSString stringWithUTF8String:busy] : @"";
-    NSString *dirsStr = (dirs != NULL) ? [NSString stringWithUTF8String:dirs] : @"";
-    NSString *bellsStr = (bells != NULL) ? [NSString stringWithUTF8String:bells] : @"";
-    NSArray *parts = (count > 0) ? [joined componentsSeparatedByString:@"\n"] : @[];
+    // Called from Go threads, which have no autorelease pool that ever
+    // drains: without this one, every string made here would be kept.
+    @autoreleasepool {
+        NSString *joined = (len > 0 && titles != NULL)
+                               ? [[[NSString alloc] initWithBytes:titles
+                                                           length:(NSUInteger)len
+                                                         encoding:NSUTF8StringEncoding] autorelease]
+                               : @"";
+        NSString *busyStr = (busy != NULL) ? [NSString stringWithUTF8String:busy] : @"";
+        NSString *dirsStr = (dirs != NULL) ? [NSString stringWithUTF8String:dirs] : @"";
+        NSString *bellsStr = (bells != NULL) ? [NSString stringWithUTF8String:bells] : @"";
+        NSArray *parts = (count > 0) ? [joined componentsSeparatedByString:@"\n"] : @[];
 
-    // Copied out of the arguments before hopping threads: the Go side frees
-    // them as soon as this returns.
-    [parts retain];
-    [busyStr retain];
-    [dirsStr retain];
-    [bellsStr retain];
+        // Copied out of the arguments before hopping threads: the Go side frees
+        // them as soon as this returns.
+        [parts retain];
+        [busyStr retain];
+        [dirsStr retain];
+        [bellsStr retain];
 
-    void (^apply)(void) = ^{
-      BOOL wasVisible = tabBarVisible();
-      int wasPosition = gTabPosition;
-      // A tab opening or closing renumbers them all, so slides in flight no
-      // longer belong to the tabs they were started for.
-      if ((int)[parts count] != tabCount()) {
-          memset(gTabShift, 0, sizeof gTabShift);
-          gDragTab = -1;
-      }
+        void (^apply)(void) = ^{
+          BOOL wasVisible = tabBarVisible();
+          int wasPosition = gTabPosition;
+          // A tab opening or closing renumbers them all, so slides in flight no
+          // longer belong to the tabs they were started for.
+          if ((int)[parts count] != tabCount()) {
+              memset(gTabShift, 0, sizeof gTabShift);
+              gDragTab = -1;
+          }
 
-      [gTabTitles release];
-      gTabTitles = parts;
-      [gTabBusy release];
-      gTabBusy = busyStr;
-      [gTabDirs release];
-      gTabDirs = dirsStr;
-      [gTabBells release];
-      gTabBells = bellsStr;
-      gActiveTab = active;
-      gTabPosition = position;
-      if (gHoverTab >= tabCount()) {
-          gHoverTab = -1;
-          gHoverClose = NO;
-      }
+          [gTabTitles release];
+          gTabTitles = parts;
+          [gTabBusy release];
+          gTabBusy = busyStr;
+          [gTabDirs release];
+          gTabDirs = dirsStr;
+          [gTabBells release];
+          gTabBells = bellsStr;
+          gActiveTab = active;
+          gTabPosition = position;
+          if (gHoverTab >= tabCount()) {
+              gHoverTab = -1;
+              gHoverClose = NO;
+          }
 
-      syncTabPositionMenu();
-      // Appearing, disappearing or moving all change how much room the grid
-      // has, which re-reports the size to Go through setFrameSize:.
-      if (wasVisible != tabBarVisible() || wasPosition != gTabPosition) {
-          [(ShellterContent *)gContent layoutViews];
-      }
-      [gTabBar setNeedsDisplay:YES];
-      [gContent setNeedsDisplay:YES];
-    };
+          syncTabPositionMenu();
+          // Appearing, disappearing or moving all change how much room the grid
+          // has, which re-reports the size to Go through setFrameSize:.
+          if (wasVisible != tabBarVisible() || wasPosition != gTabPosition) {
+              [(ShellterContent *)gContent layoutViews];
+          }
+          [gTabBar setNeedsDisplay:YES];
+          [gContent setNeedsDisplay:YES];
+        };
 
-    // Run it now when we are already on the main thread. That is not just an
-    // optimisation: Run pushes the first set of tabs before the window exists,
-    // and the window has to know whether there is a sidebar to make room for
-    // before it decides how big to be.
-    if ([NSThread isMainThread]) {
-        apply();
-        return;
+        // Run it now when we are already on the main thread. That is not just an
+        // optimisation: Run pushes the first set of tabs before the window exists,
+        // and the window has to know whether there is a sidebar to make room for
+        // before it decides how big to be.
+        if ([NSThread isMainThread]) {
+            apply();
+            return;
+        }
+        dispatch_async(dispatch_get_main_queue(), apply);
     }
-    dispatch_async(dispatch_get_main_queue(), apply);
 }
 
 void shellterSetMouseTracking(int enabled) {
     dispatch_async(dispatch_get_main_queue(), ^{
       if (gTracking != nil) {
           [gView removeTrackingArea:gTracking];
+          [gTracking release];
           gTracking = nil;
       }
       if (!enabled) {
@@ -2678,10 +2695,10 @@ void shellterDrawText(int row, int col, const char *utf8, int len,
     if (text == nil) {
         return;
     }
-    NSMutableDictionary *attrs = [@{
+    NSMutableDictionary *attrs = [[@{
         NSFontAttributeName : fontForFlags(flags),
         NSForegroundColorAttributeName : colorFromRGB(rgb),
-    } mutableCopy];
+    } mutableCopy] autorelease];
     if (flags & kFlagUnderline) {
         attrs[NSUnderlineStyleAttributeName] = @(NSUnderlineStyleSingle);
     }

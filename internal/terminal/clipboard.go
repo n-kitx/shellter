@@ -196,8 +196,9 @@ const (
 //
 //   - Newlines become carriage returns. Return is what a terminal sends when
 //     you press it, and a paste should arrive as though you had.
-//   - Control characters are dropped, tab and return aside. Pasted text is
-//     text. If it were passed through as-is, an ESC in something copied off a
+//   - Control characters are dropped, tab and return aside - the C1 ones
+//     (U+0080-U+009F) too, since U+009B is CSI to a program that reads 8-bit
+//     controls. Pasted text is text. If it were passed through as-is, an ESC in something copied off a
 //     web page would be read as an escape sequence and could move the cursor,
 //     change colours, or - inside a shell that has not asked for bracketed
 //     paste - end the line and start running it.
@@ -219,7 +220,7 @@ func pasteBytes(text string, bracketed bool) []byte {
 			continue
 		case r == '\t':
 			out = append(out, '\t')
-		case r < 0x20 || r == 0x7f:
+		case r < 0x20 || (r >= 0x7f && r < 0xa0):
 			// dropped: see above
 		default:
 			out = utf8Append(out, r)
