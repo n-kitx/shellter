@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/thakurankit7/shellter/internal/parser"
@@ -105,9 +106,7 @@ func (g *GUI) saveSession() {
 
 	for leaf, p := range leaves {
 		leaf.Dir = p.directory()
-		p.mu.Lock()
-		leaf.Text = p.scr.Transcript(transcriptLines)
-		p.mu.Unlock()
+		leaf.Text = p.transcript()
 	}
 	data, err := json.Marshal(s)
 	if err != nil {
@@ -259,7 +258,10 @@ func (p *pane) restoreText(text string, saved time.Time) {
 	if text == "" {
 		return
 	}
-	note := "\r\n\x1b[0;2mRestored session: " + saved.Format("Mon 2 Jan 15:04") + "\x1b[0m\r\n"
+	text = afterOldNotes(text)
+	p.restored = text
+	p.restoredNote = "Restored session: " + saved.Format("Mon 2 Jan 15:04")
+	note := "\r\n\x1b[0;2m" + p.restoredNote + "\x1b[0m\r\n"
 	ps := parser.New()
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -270,4 +272,50 @@ func (p *pane) restoreText(text string, saved time.Time) {
 	p.scr.TakeReplies()
 	p.scr.TakeClipboard()
 	p.scr.TakeBell()
+}
+
+// transcript is the text this pane saves. A restored pane that nobody typed
+// into saves what it was restored with, unchanged: opening Shellter and
+// quitting again must not add a new shell's startup to it every time. One
+// that was used saves only what came after its "Restored session" line - this
+// session - so the text is at most one session deep, however many times it
+// is restored. Any other pane saves everything it has.
+func (p *pane) transcript() string {
+	if p.restored != "" && !p.touched.Load() {
+		return p.restored
+	}
+	p.mu.Lock()
+	text := p.scr.Transcript(transcriptLines)
+	p.mu.Unlock()
+	if p.restoredNote == "" {
+		return text
+	}
+	// The last one: output printed since could, just, contain the same words.
+	// Not found means it has scrolled out of what is kept, and all that is
+	// left is this session's.
+	if i := strings.LastIndex(text, p.restoredNote); i >= 0 {
+		if j := strings.Index(text[i:], "\r\n"); j >= 0 {
+			return text[i+j+2:]
+		}
+		return ""
+	}
+	return text
+}
+
+// oldNote is how a "Restored session" line reads in a saved transcript: faint
+// text, from a reset.
+const oldNote = "\x1b[0;2mRestored session: "
+
+// afterOldNotes drops everything up to and including the last "Restored
+// session" line in a saved text. Sessions saved before transcript kept restored
+// text out stacked one restore on another; this is what unstacks them.
+func afterOldNotes(text string) string {
+	i := strings.LastIndex(text, oldNote)
+	if i < 0 {
+		return text
+	}
+	if j := strings.Index(text[i:], "\r\n"); j >= 0 {
+		return text[i+j+2:]
+	}
+	return ""
 }

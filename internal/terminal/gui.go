@@ -1156,6 +1156,7 @@ func (g *GUI) writeTo(p *pane, b []byte) {
 		return
 	}
 	if p != nil {
+		p.touched.Store(true) // see pane.transcript
 		p.write(b)
 	}
 }

@@ -84,6 +84,16 @@ type pane struct {
 	// view is in history and for a moment after it moves. UI thread only.
 	scrollOffset int
 	scrolledAt   time.Time
+
+	// restored is the text this pane was restored with, and restoredNote the
+	// "Restored session" line put under it; both "" for a pane that was not
+	// restored. touched says something has been typed into it since. Together
+	// they decide what the pane saves (transcript): a pane nobody used keeps
+	// the text it came back with, and one that was used keeps only this
+	// session's, so restored text is never saved again on top of itself.
+	restored     string
+	restoredNote string
+	touched      atomic.Bool
 }
 
 // bellInterval is the least time between two bells from one pane. A program

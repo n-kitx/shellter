@@ -44,6 +44,8 @@ rather than rediscovering the state by reading the code.
       splits and ratios, focus, each pane's directory and last 2,000 lines
       with colours, into ~/Library/Application Support/Shellter/session.json.
       Running programs do not come back; closing the last tab starts fresh.
+      Restores never stack: an untouched pane re-saves what it was restored
+      with, a used one only its own session (`pane.transcript`).
 - [x] Double click on the title strip zooms / minimises per System Settings.
 - [x] Sidebar width is draggable (120-480 pt), and remembered.
 

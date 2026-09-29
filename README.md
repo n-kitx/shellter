@@ -1208,7 +1208,9 @@ Quitting, or closing the window, with tabs open saves the session to
 brings it back: the tabs in order with their names, each tab's splits in their
 proportions, the tab and pane that had the focus, and in every pane the last
 2,000 lines of text with their colours, a faint "Restored session" line, and a
-new shell in the directory the old one was in. What was running does not come
+new shell in the directory the old one was in. Restored text is never saved
+again on top of itself: a pane you did not type in keeps what it came back
+with, and one you used keeps only that session. What was running does not come
 back - the processes are gone - and a full-screen program's screen is left
 out. Closing the last tab yourself (or `exit` in it) starts the next session
 fresh. The file holds what was on screen, so it is readable only by you;
