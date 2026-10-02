@@ -188,14 +188,13 @@ func rewrap(cells []Cell, cols, at int, row []Cell, emit func([]Cell, bool)) (at
 		if w == 0 {
 			continue // a continuation cell travels with its wide character
 		}
+		if w > cols {
+			c, w = Blank, 1 // a wide character in a one-column terminal
+		}
 		if col+w > cols {
-			if w > cols {
-				c, w = Blank, 1 // a wide character in a one-column terminal
-			} else {
-				emit(row, true)
-				blankRow(row)
-				n, col = n+1, 0
-			}
+			emit(row, true)
+			blankRow(row)
+			n, col = n+1, 0
 		}
 		if i == at {
 			atRow, atCol = n, col

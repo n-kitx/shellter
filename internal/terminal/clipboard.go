@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/thakurankit7/shellter/internal/input"
@@ -174,12 +176,44 @@ func (g *GUI) paste() {
 	if text == "" {
 		return
 	}
+	g.pasteInto(p, text)
+}
 
+// pasteInto pastes text into a pane - the clipboard, or text dropped on it -
+// asking first when the paste would run commands.
+//
+// That is a paste of more than one line into a program that has not asked
+// for bracketed paste: every newline is a Return, and each line runs as it
+// arrives, before there is any chance to read it. Text copied from a web page
+// can hold a line that was not visible there. A shell with bracketed paste on
+// (zsh, recent bash) only puts the text on its command line, and a full-screen
+// program such as vim inserts it, so neither is asked about.
+func (g *GUI) pasteInto(p *pane, text string) {
 	p.mu.Lock()
-	bracketed := p.scr.Modes().BracketedPaste
+	modes := p.scr.Modes()
 	p.mu.Unlock()
 
-	g.writeTo(p, pasteBytes(text, bracketed))
+	if g.PasteWarning && !modes.BracketedPaste && !modes.AltScreen {
+		if lines := pastedLines(text); lines > 1 {
+			detail := fmt.Sprintf("There is no bracketed paste here, so each of the %d lines "+
+				"will run as soon as it arrives.", lines)
+			if !g.ask(fmt.Sprintf("Paste %d lines?", lines), detail, "Paste") {
+				return
+			}
+		}
+	}
+	g.writeTo(p, pasteBytes(text, modes.BracketedPaste))
+}
+
+// pastedLines is how many lines a paste holds. A newline at the very end
+// does not start another: "ls\n" is one line.
+func pastedLines(text string) int {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	n := strings.Count(text, "\n")
+	if !strings.HasSuffix(text, "\n") {
+		n++
+	}
+	return n
 }
 
 // Bracketed paste (?2004) wraps the text in markers so that the program can

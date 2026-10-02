@@ -27,6 +27,7 @@ type Settings struct {
 	CursorBlink     bool
 	LineHeight      float64
 	RestoreSession  bool
+	PasteWarning    bool
 }
 
 // ParseCursorStyle reads the cursor-style setting; package config has already
@@ -80,6 +81,7 @@ func (g *GUI) Use(s Settings) {
 	g.CursorStyle, g.CursorBlink = s.CursorStyle, s.CursorBlink
 	g.LineHeight = s.LineHeight
 	g.RestoreSession = s.RestoreSession
+	g.PasteWarning = s.PasteWarning
 }
 
 // apply takes settings while the window is open, changing only what changed.
@@ -94,6 +96,7 @@ func (g *GUI) apply(s Settings) {
 	g.Bell = s.Bell
 	g.CursorStyle, g.CursorBlink = s.CursorStyle, s.CursorBlink
 	g.RestoreSession = s.RestoreSession
+	g.PasteWarning = s.PasteWarning
 	render.SetChrome(g.chrome())
 
 	// A new font or size resets any zoom: the file is the newer word.

@@ -73,6 +73,9 @@ type Config struct {
 	// RestoreSession brings back the tabs, splits, directories and text that
 	// were open when Shellter last quit.
 	RestoreSession bool
+	// PasteWarning asks before a paste of several lines into a program that
+	// would run each one as it arrived.
+	PasteWarning bool
 
 	// themesDir is where theme files are looked for: "themes" beside the
 	// settings file.
@@ -94,6 +97,7 @@ func Default() Config {
 		CursorStyle:       "block",
 		LineHeight:        1,
 		RestoreSession:    true,
+		PasteWarning:      true,
 		themesDir:         themesBeside(Path()),
 	}
 }
@@ -168,6 +172,7 @@ func Create(path string) error {
 # cursor-blink = %t
 # line-height = %g    # 1 is the font's own spacing; 1.2 is a fifth taller
 # restore-session = %t    # reopen the tabs and text you quit with
+# paste-warning = %t    # ask before a paste of several lines would run them
 # bell = %s    # sound, flash, both or off
 # tab-position = %s    # top or left
 # background-opacity = %g    # 0 to 1
@@ -175,7 +180,7 @@ func Create(path string) error {
 # window-padding = %d
 # scrollback = %d
 `, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontFamily, d.FontSize, d.OptionAsMeta, d.CopyOnSelect,
-		d.CursorStyle, d.CursorBlink, d.LineHeight, d.RestoreSession, d.Bell, d.TabPosition,
+		d.CursorStyle, d.CursorBlink, d.LineHeight, d.RestoreSession, d.PasteWarning, d.Bell, d.TabPosition,
 		d.BackgroundOpacity, d.BackgroundBlur, d.WindowPadding, d.Scrollback)
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -248,6 +253,12 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("option-as-meta: %w", err)
 		}
 		c.OptionAsMeta = b
+	case "paste-warning":
+		b, err := parseBool(value)
+		if err != nil {
+			return fmt.Errorf("paste-warning: %w", err)
+		}
+		c.PasteWarning = b
 	case "restore-session":
 		b, err := parseBool(value)
 		if err != nil {

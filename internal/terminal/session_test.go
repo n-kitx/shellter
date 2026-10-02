@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -68,5 +70,49 @@ func TestStackedSessionsAreUnstacked(t *testing.T) {
 	}
 	if n := strings.Count(text, "Restored session"); n != 1 {
 		t.Fatalf("%d restored-session lines, want 1:\n%s", n, text)
+	}
+}
+
+// The session is saved while Shellter runs, only when something changed, and
+// never again once the last tab has closed.
+func TestSessionAutosave(t *testing.T) {
+	defer func(d time.Duration) { autosaveInterval = d }(autosaveInterval)
+	autosaveInterval = 10 * time.Millisecond
+
+	path := filepath.Join(t.TempDir(), "session.json")
+	g := newTestGUI(5, 20)
+	g.RestoreSession, g.SessionPath = true, path
+	stop := make(chan struct{})
+	defer close(stop)
+	go g.autosave(stop)
+
+	time.Sleep(50 * time.Millisecond)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("saved with nothing changed")
+	}
+	feedPane(g.current(), "work in progress")
+	g.sessionDirty.Store(true)
+	waitUntil(t, "an autosave", func() bool {
+		data, err := os.ReadFile(path)
+		return err == nil && strings.Contains(string(data), "work in progress")
+	})
+
+	g.endSession()
+	g.sessionDirty.Store(true)
+	g.saveSession()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("the session came back after the last tab closed")
+	}
+}
+
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

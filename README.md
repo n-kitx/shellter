@@ -1182,6 +1182,9 @@ line-height = 1.2
 
 # reopen the tabs, splits and text you quit with (the default)
 restore-session = true
+
+# ask before a paste of several lines would run each one (the default)
+paste-warning = true
 ```
 
 Whatever `bell` says, a bell in a background tab puts a bell on that tab until
@@ -1203,7 +1206,7 @@ dragged, and Shellter > Secure Keyboard Entry. They live in macOS's own preferen
 while `font-size` in the file stays what it was when you zoomed: change the
 file, and the file wins.
 
-Quitting, or closing the window, with tabs open saves the session to
+Quitting, or closing the window, with tabs open saves the session (and so does a 30-second autosave while anything changes, in case of a crash) to
 `~/Library/Application Support/Shellter/session.json`, and the next start
 brings it back: the tabs in order with their names, each tab's splits in their
 proportions, the tab and pane that had the focus, and in every pane the last

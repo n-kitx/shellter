@@ -45,7 +45,8 @@ rather than rediscovering the state by reading the code.
       with colours, into ~/Library/Application Support/Shellter/session.json.
       Running programs do not come back; closing the last tab starts fresh.
       Restores never stack: an untouched pane re-saves what it was restored
-      with, a used one only its own session (`pane.transcript`).
+      with, a used one only its own session (`pane.transcript`). Also saved
+      every 30 s while anything changes, so a crash loses at most that.
 - [x] Double click on the title strip zooms / minimises per System Settings.
 - [x] Sidebar width is draggable (120-480 pt), and remembered.
 
@@ -113,6 +114,9 @@ rather than rediscovering the state by reading the code.
       `:line:col` stripped); runnable files are revealed, not opened. Hover
       underlines a link in blue with a tooltip; Cmd brightens it and shows
       the hand pointer.
+- [x] Multi-line paste warning (`paste-warning`, default on): asks before
+      pasting several lines where each would run on arrival - no bracketed
+      paste, no full-screen program. zsh at its prompt is never asked about.
 - [x] Drop files on the window to type their paths, backslash-escaped, into
       the pane under the drop; dropped text is pasted.
 - [x] Reflow on resize, history included (`screen/reflow.go`). Wide
@@ -170,6 +174,10 @@ rather than rediscovering the state by reading the code.
 - [ ] `SHELLTER_TRACE` / `SHELLTER_SCREEN` work only headless (`app.go`), not
       in the GUI (`gui.go`).
 - [ ] Run vttest / esctest against Shellter and record the results.
+- [x] Fuzz tests: `FuzzParse` (no panics; how reads split the bytes changes
+      nothing) and `FuzzScreen` (no panics through resizes, cursor on the
+      grid, a transcript replays). The first run found a reflow crash on a
+      wide character at one column; crashers stay in `testdata/fuzz`.
 
 ## Distribution
 

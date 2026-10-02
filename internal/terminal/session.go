@@ -28,6 +28,11 @@ import (
 // sessionVersion is the file's format. A file of any other version is ignored.
 const sessionVersion = 1
 
+// autosaveInterval is how often the session is saved while Shellter runs, so
+// that a crash or a forced quit loses at most this much rather than all of it.
+// Only when something changed: an idle window writes nothing.
+var autosaveInterval = 30 * time.Second // a variable so tests can shorten it
+
 // startupQuiet is how long a restored tab's printing is not activity: long
 // enough for a shell with a heavy startup file to reach its first prompt.
 const startupQuiet = 3 * time.Second
@@ -79,6 +84,13 @@ func (g *GUI) sessionOn() bool { return g.RestoreSession && g.SessionPath != "" 
 // lock; each pane's directory and text are read after it is let go, one pane
 // lock at a time, like everything else that visits every pane.
 func (g *GUI) saveSession() {
+	// One save at a time - the timer's and the quit's both write the same
+	// file - and none once the session has been ended (endSession).
+	g.saveMu.Lock()
+	defer g.saveMu.Unlock()
+	if g.sessionEnded {
+		return
+	}
 	if !g.sessionOn() {
 		g.forgetSession()
 		return
@@ -318,4 +330,30 @@ func afterOldNotes(text string) string {
 		return text[i+j+2:]
 	}
 	return ""
+}
+
+// autosave saves the session every autosaveInterval while anything has
+// changed - output, or the tabs rearranged - until stop is closed.
+func (g *GUI) autosave(stop <-chan struct{}) {
+	tick := time.NewTicker(autosaveInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+			if g.sessionDirty.Swap(false) && !g.quitting.Load() {
+				g.saveSession()
+			}
+		}
+	}
+}
+
+// endSession forgets the saved session for good - the last tab closed, so the
+// next start is a fresh one - and stops any later save writing it back.
+func (g *GUI) endSession() {
+	g.saveMu.Lock()
+	defer g.saveMu.Unlock()
+	g.sessionEnded = true
+	g.forgetSession()
 }

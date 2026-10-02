@@ -23,10 +23,7 @@ func (g *GUI) drop(row, col int, paths []string, text string) {
 	if text == "" {
 		return
 	}
-	p.mu.Lock()
-	bracketed := p.scr.Modes().BracketedPaste
-	p.mu.Unlock()
-	g.writeTo(p, pasteBytes(text, bracketed))
+	g.pasteInto(p, text)
 }
 
 // shellQuote makes a path one word to a shell, backslash-escaping each

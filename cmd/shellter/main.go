@@ -60,6 +60,7 @@ func run() (int, error) {
 	flag.Bool("cursor-blink", d.CursorBlink, "blink the cursor")
 	flag.Float64("line-height", d.LineHeight, "row height as a multiple of the font's own, 0.8 to 3")
 	flag.Bool("restore-session", d.RestoreSession, "reopen the tabs, splits and text Shellter last quit with")
+	flag.Bool("paste-warning", d.PasteWarning, "ask before a paste of several lines would run them")
 	flag.Parse()
 
 	// load reads the settings - file, then flags - into the form the window
@@ -88,6 +89,7 @@ func run() (int, error) {
 			CursorBlink:     cfg.CursorBlink,
 			LineHeight:      cfg.LineHeight,
 			RestoreSession:  cfg.RestoreSession,
+			PasteWarning:    cfg.PasteWarning,
 			Chrome: render.Chrome{
 				Opacity: cfg.BackgroundOpacity,
 				Blur:    cfg.BackgroundBlur,

@@ -64,6 +64,8 @@ type GUI struct {
 	// start, in the file at SessionPath; "" keeps no session. See session.go.
 	RestoreSession bool
 	SessionPath    string
+	// PasteWarning asks before a multi-line paste that would run its lines.
+	PasteWarning bool
 	// Reload reads the settings again, file and flags, for when the file
 	// changes; ThemesDir is where theme files live, so that editing one
 	// counts as a change too. Without Reload, settings are read once.
@@ -133,6 +135,12 @@ type GUI struct {
 	// quitting is set once the user has agreed to quit or close the window,
 	// and the session has been saved.
 	quitting atomic.Bool
+	// sessionDirty says something worth saving has happened since the last
+	// autosave; saveMu keeps two saves from writing the file at once, and
+	// sessionEnded, under it, stops any save after the last tab has closed.
+	sessionDirty atomic.Bool
+	saveMu       sync.Mutex
+	sessionEnded bool
 
 	// out, when set, replaces the active tab's PTY as the destination for
 	// encoded input. Tests set it; nothing else does.
@@ -176,6 +184,7 @@ func (g *GUI) Run() (int, error) {
 	stop := make(chan struct{})
 	go g.watchSettings(stop)
 	go g.blinker(stop)
+	go g.autosave(stop)
 	defer close(stop)
 
 	runErr := render.Run(render.Config{
@@ -223,7 +232,7 @@ func (g *GUI) Run() (int, error) {
 	// The window is gone. When it went because the last tab closed, the next
 	// start is a fresh one; a quit saved the session on its way out (canQuit).
 	if !g.quitting.Load() {
-		g.forgetSession()
+		g.endSession()
 	}
 	// Make sure no shell outlives it.
 	g.closeWindow()
@@ -483,6 +492,7 @@ func (g *GUI) moveTabBar(pos render.TabPosition) {
 
 // panePrinted is called when a pane's shell printed something.
 func (g *GUI) panePrinted(tb *tab, p *pane) {
+	g.sessionDirty.Store(true)
 	g.mu.Lock()
 	front := g.active < len(g.tabs) && g.tabs[g.active] == tb
 	changed := false
@@ -591,6 +601,7 @@ func (g *GUI) shellName() string {
 
 // syncTabs pushes the list to the window.
 func (g *GUI) syncTabs() {
+	g.sessionDirty.Store(true) // a tab opened, closed, moved or renamed
 	g.mu.Lock()
 	tabs, active := g.tabViews(), g.active
 	canSplit := active < len(g.tabs) && !g.tabs[active].full()

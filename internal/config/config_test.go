@@ -41,6 +41,7 @@ cursor-style = bar
 cursor-blink = on
 line-height = 1.25
 restore-session = no
+paste-warning = off
 `)
 	nord, ok := theme.Get("nord")
 	if !ok {
@@ -62,6 +63,7 @@ restore-session = no
 		CursorBlink:       true,
 		LineHeight:        1.25,
 		RestoreSession:    false,
+		PasteWarning:      false,
 		themesDir:         Default().themesDir,
 	}
 	if cfg != want {
@@ -115,6 +117,7 @@ func TestBadValuesAreRejected(t *testing.T) {
 		"line-height = 0.5",
 		"line-height = tall",
 		"restore-session = later",
+		"paste-warning = sometimes",
 		"copy-on-select = maybe",
 		"colour-scheme = dracula", // a real Ghostty setting, not one of ours
 		"tab-position left",
@@ -213,8 +216,8 @@ func TestCreateWritesAParseableTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an uncommented setting is invalid: %v", err)
 	}
-	if settings != 15 {
-		t.Fatalf("the template lists %d settings, want every one of the 15", settings)
+	if settings != 16 {
+		t.Fatalf("the template lists %d settings, want every one of the 16", settings)
 	}
 	if cfg != Default() {
 		t.Fatalf("the template's values are not the defaults: %+v", cfg)

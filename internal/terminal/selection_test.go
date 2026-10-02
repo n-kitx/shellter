@@ -283,3 +283,62 @@ func TestSelectAllTakesTheWholePane(t *testing.T) {
 		}
 	}
 }
+
+// A paste of several lines into a program that would run each one asks
+// first; bracketed paste, a full-screen program, one line, or the setting off
+// do not.
+func TestMultiLinePasteAsks(t *testing.T) {
+	g := newTestGUI(5, 40)
+	g.PasteWarning = true
+	out := g.sink()
+	asked := 0
+	answer := false
+	g.confirm = func(message, detail, action string) bool {
+		asked++
+		if message != "Paste 3 lines?" {
+			t.Errorf("asked %q", message)
+		}
+		return answer
+	}
+	p := g.current()
+
+	g.pasteInto(p, "rm -rf build\nmake\nmake install\n")
+	if asked != 1 || out.Len() != 0 {
+		t.Fatalf("asked %d times and pasted %q; want one question and nothing pasted", asked, out.String())
+	}
+	answer = true
+	g.pasteInto(p, "rm -rf build\nmake\nmake install")
+	if asked != 2 || !strings.Contains(out.String(), "make install") {
+		t.Fatalf("after yes: asked %d, pasted %q", asked, out.String())
+	}
+
+	for _, c := range []struct {
+		name, setup, text string
+	}{
+		{"one line", "", "make install\n"},
+		{"bracketed paste", "\x1b[?2004h", "a\nb\nc"},
+		{"a full-screen program", "\x1b[?2004l\x1b[?1049h", "a\nb\nc"},
+	} {
+		feedPane(p, c.setup)
+		g.pasteInto(p, c.text)
+		if asked != 2 {
+			t.Fatalf("%s: asked", c.name)
+		}
+	}
+	feedPane(p, "\x1b[?1049l")
+	g.PasteWarning = false
+	g.pasteInto(p, "a\nb")
+	if asked != 2 {
+		t.Fatal("asked with the setting off")
+	}
+}
+
+func TestPastedLines(t *testing.T) {
+	for text, want := range map[string]int{
+		"ls": 1, "ls\n": 1, "a\nb": 2, "a\r\nb\r\n": 2, "a\rb\rc": 3, "": 1,
+	} {
+		if got := pastedLines(text); got != want {
+			t.Errorf("pastedLines(%q) = %d, want %d", text, got, want)
+		}
+	}
+}
