@@ -2780,6 +2780,229 @@ static NSString *stringFrom(const char *utf8, int len) {
                                    encoding:NSUTF8StringEncoding] autorelease];
 }
 
+// ---------------------------------------------------------------------------
+// Box drawing, blocks and Powerline (render/box.go says why)
+// ---------------------------------------------------------------------------
+
+// fillCrisp fills a rectangle with anti-aliasing off, so a block or a line
+// that ends on a cell's edge meets the next cell's exactly, with no faint seam
+// where two half-covered pixels would have been.
+static void fillCrisp(NSRect r) {
+    NSGraphicsContext *ctx = [NSGraphicsContext currentContext];
+    BOOL was = [ctx shouldAntialias];
+    [ctx setShouldAntialias:NO];
+    NSRectFill(r);
+    [ctx setShouldAntialias:was];
+}
+
+// lineWidth is a light line's thickness: a point, and more for big text.
+static double lineWidth(void) { return MAX(1, round(gCharWidth / 8)); }
+
+// armSpan is how thick an arm of each weight is: none, light, heavy, and
+// double - two light lines with a light line's gap between them.
+static double armSpan(int weight) {
+    double t = lineWidth();
+    switch (weight) {
+    case 1: return t;
+    case 2: return 2 * t;
+    case 3: return 3 * t;
+    }
+    return 0;
+}
+
+// drawArm draws one arm of a line glyph, from the middle of the cell to an
+// edge. A horizontal arm starts far enough back to cover the vertical stem
+// (stem is that stem's thickness), so corners and tees join solid.
+static void drawArm(NSRect cell, BOOL horizontal, BOOL toEnd, int weight, double stem) {
+    if (weight == 0) {
+        return;
+    }
+    double t = lineWidth();
+    double span = armSpan(weight);
+    if (horizontal) {
+        double cy = round(NSMidY(cell) - span / 2);
+        double cx = NSMidX(cell);
+        double x0 = toEnd ? round(cx - stem / 2) : NSMinX(cell);
+        double x1 = toEnd ? NSMaxX(cell) : round(cx + stem / 2);
+        if (stem == 0) {
+            x0 = toEnd ? round(cx - t / 2) : x0;
+            x1 = toEnd ? x1 : round(cx + t / 2);
+        }
+        fillCrisp(NSMakeRect(x0, cy, x1 - x0, span)); // a double's gap is cut later
+        return;
+    }
+    double cx = round(NSMidX(cell) - span / 2);
+    double cy = NSMidY(cell);
+    double y0 = toEnd ? round(cy - stem / 2) : NSMinY(cell);
+    double y1 = toEnd ? NSMaxY(cell) : round(cy + stem / 2);
+    if (stem == 0) {
+        y0 = toEnd ? round(cy - t / 2) : y0;
+        y1 = toEnd ? y1 : round(cy + t / 2);
+    }
+    fillCrisp(NSMakeRect(cx, y0, span, y1 - y0));
+}
+
+// carveDouble cuts the gap down the middle of each double arm, in the
+// background colour, turning the solid bars drawArm drew into pairs of lines.
+// Where a cut starts is what makes the joins come out right: against another
+// double line it starts half a line back from the middle, so the inner lines
+// meet in a corner (╔) or open into each other (╬, ╠); against a single or
+// heavy line it starts beyond that line, so both lines of the pair run into it
+// (╒); and an arm with nothing across it is cut from the middle.
+static void carveDouble(NSRect cell, int up, int right, int down, int left, NSColor *bg) {
+    double t = lineWidth();
+    double cx = NSMidX(cell), cy = NSMidY(cell);
+    double gx = round(cx - armSpan(3) / 2) + t; // the gap's left edge, in a vertical pair
+    double gy = round(cy - armSpan(3) / 2) + t; // and its top, in a horizontal pair
+    BOOL vDouble = (up == 3 || down == 3), hDouble = (left == 3 || right == 3);
+    double vStem = MAX(armSpan(up), armSpan(down)), hStem = MAX(armSpan(left), armSpan(right));
+    [bg setFill];
+    // Horizontal arms: from where the cut starts to the edge.
+    double hFrom = vDouble ? gx : (vStem > 0 ? round(cx + vStem / 2) : gx);
+    double hTo = vDouble ? gx + t : (vStem > 0 ? round(cx - vStem / 2) : gx + t);
+    if (right == 3) {
+        fillCrisp(NSMakeRect(hFrom, gy, NSMaxX(cell) - hFrom, t));
+    }
+    if (left == 3) {
+        fillCrisp(NSMakeRect(NSMinX(cell), gy, hTo - NSMinX(cell), t));
+    }
+    double vFrom = hDouble ? gy : (hStem > 0 ? round(cy + hStem / 2) : gy);
+    double vTo = hDouble ? gy + t : (hStem > 0 ? round(cy - hStem / 2) : gy + t);
+    if (down == 3) {
+        fillCrisp(NSMakeRect(gx, vFrom, t, NSMaxY(cell) - vFrom));
+    }
+    if (up == 3) {
+        fillCrisp(NSMakeRect(gx, NSMinY(cell), t, vTo - NSMinY(cell)));
+    }
+}
+
+void shellterDrawGlyph(int row, int col, int kind, int a, int b, int c, int d, unsigned int rgb,
+                       unsigned int bg) {
+    NSPoint o = cellOrigin(row, col);
+    NSRect cell = NSMakeRect(o.x, o.y, gCharWidth, gLineHeight);
+    double x = NSMinX(cell), y = NSMinY(cell), w = NSWidth(cell), h = NSHeight(cell);
+    double cx = NSMidX(cell), cy = NSMidY(cell), t = lineWidth();
+    NSColor *color = colorFromRGB(rgb);
+    [color setFill];
+    [color setStroke];
+
+    switch (kind) {
+    case 1: { // lines: up, right, down, left. The view is flipped: up is -y.
+        double vStem = MAX(armSpan(a), armSpan(c));
+        double hStem = MAX(armSpan(b), armSpan(d));
+        drawArm(cell, YES, YES, b, vStem);  // right
+        drawArm(cell, YES, NO, d, vStem);   // left
+        drawArm(cell, NO, YES, c, hStem);   // down
+        drawArm(cell, NO, NO, a, hStem);    // up
+        if (a == 3 || b == 3 || c == 3 || d == 3) {
+            carveDouble(cell, a, b, c, d, colorFromRGB(bg));
+        }
+        break;
+    }
+    case 2: { // dashes: vertical, weight, count
+        double span = armSpan(b);
+        double seg = (a ? h : w) / MAX(c, 1);
+        for (int i = 0; i < c; i++) {
+            double start = i * seg + seg * 0.2, len = seg * 0.6;
+            if (a) {
+                fillCrisp(NSMakeRect(round(cx - span / 2), round(y + start), span, round(len)));
+            } else {
+                fillCrisp(NSMakeRect(round(x + start), round(cy - span / 2), round(len), span));
+            }
+        }
+        break;
+    }
+    case 3: { // a rounded corner: 0 ╭ 1 ╮ 2 ╯ 3 ╰
+        double lx = round(cx - t / 2) + t / 2, ly = round(cy - t / 2) + t / 2;
+        double r = MIN(w, h) / 2;
+        BOOL down = (a == 0 || a == 1), right = (a == 0 || a == 3);
+        NSPoint vEnd = NSMakePoint(lx, down ? NSMaxY(cell) : y);
+        NSPoint hEnd = NSMakePoint(right ? NSMaxX(cell) : x, ly);
+        NSBezierPath *path = [NSBezierPath bezierPath];
+        [path moveToPoint:vEnd];
+        [path lineToPoint:NSMakePoint(lx, ly + (down ? r : -r))];
+        [path curveToPoint:NSMakePoint(lx + (right ? r : -r), ly)
+             controlPoint1:NSMakePoint(lx, ly)
+             controlPoint2:NSMakePoint(lx, ly)];
+        [path lineToPoint:hEnd];
+        [path setLineWidth:t];
+        [path stroke];
+        break;
+    }
+    case 4: { // diagonals: 1 ╱, 2 ╲
+        NSBezierPath *path = [NSBezierPath bezierPath];
+        if (a & 1) {
+            [path moveToPoint:NSMakePoint(x, y + h)];
+            [path lineToPoint:NSMakePoint(x + w, y)];
+        }
+        if (a & 2) {
+            [path moveToPoint:NSMakePoint(x, y)];
+            [path lineToPoint:NSMakePoint(x + w, y + h)];
+        }
+        [path setLineWidth:t];
+        [path stroke];
+        break;
+    }
+    case 5: { // a block, in eighths from the top left
+        double x0 = round(x + a * w / 8), x1 = round(x + c * w / 8);
+        double y0 = round(y + b * h / 8), y1 = round(y + d * h / 8);
+        if (c == 8) {
+            x1 = round(x + w); // to the very edge, which rounding must not miss
+        }
+        if (d == 8) {
+            y1 = round(y + h);
+        }
+        fillCrisp(NSMakeRect(x0, y0, x1 - x0, y1 - y0));
+        break;
+    }
+    case 6: // a shade
+        [[color colorWithAlphaComponent:a / 100.0] setFill];
+        fillCrisp(NSMakeRect(round(x), round(y), round(x + w) - round(x), round(y + h) - round(y)));
+        break;
+    case 7: { // quadrants
+        double mx = round(cx), my = round(cy), x0 = round(x), x1 = round(x + w);
+        double y0 = round(y), y1 = round(y + h);
+        if (a & 1) fillCrisp(NSMakeRect(x0, y0, mx - x0, my - y0));
+        if (a & 2) fillCrisp(NSMakeRect(mx, y0, x1 - mx, my - y0));
+        if (a & 4) fillCrisp(NSMakeRect(x0, my, mx - x0, y1 - my));
+        if (a & 8) fillCrisp(NSMakeRect(mx, my, x1 - mx, y1 - my));
+        break;
+    }
+    case 8: { // Powerline: 0-3 arrows, 4-7 half circles; even ones solid
+        BOOL solid = (a % 2) == 0;
+        BOOL pointsRight = (a == 0 || a == 1 || a == 4 || a == 5);
+        NSBezierPath *path;
+        if (a < 4) {
+            path = [NSBezierPath bezierPath];
+            // The flat side reaches a point into the segment it finishes, so
+            // no half-covered column of pixels shows as a seam between them.
+            double tip = pointsRight ? x + w : x, base = pointsRight ? x - 1 : x + w + 1;
+            [path moveToPoint:NSMakePoint(base, y)];
+            [path lineToPoint:NSMakePoint(tip, cy)];
+            [path lineToPoint:NSMakePoint(base, y + h)];
+            if (solid) {
+                [path closePath];
+            }
+        } else {
+            // Half of an ellipse twice the cell's width, its flat side on the
+            // edge the segment it finishes is on.
+            NSRect oval = pointsRight ? NSMakeRect(x - w, y, 2 * w, h) : NSMakeRect(x, y, 2 * w, h);
+            path = [NSBezierPath bezierPathWithOvalInRect:oval];
+        }
+        [NSGraphicsContext saveGraphicsState];
+        NSRectClip(pointsRight ? NSMakeRect(x - 1, y, w + 1, h) : NSMakeRect(x, y, w + 1, h));
+        if (solid) {
+            [path fill];
+        } else {
+            [path setLineWidth:t];
+            [path stroke];
+        }
+        [NSGraphicsContext restoreGraphicsState];
+        break;
+    }
+    }
+}
+
 // drawWave draws the wavy underline - an error or a misspelling in an editor
 // - under width cells. AppKit has no such underline style, so it is a path:
 // half-waves two points long, a point and a half either side of where a

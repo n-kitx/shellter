@@ -411,6 +411,11 @@ func drawPane(p Pane, defaultBG uint32, faded bool) {
 		if sp.blank() {
 			continue // the fill said everything there was to say
 		}
+		if g := sp.Glyph; g.kind != glyphNone {
+			C.shellterDrawGlyph(C.int(row+sp.Row), C.int(col+sp.Col), C.int(g.kind),
+				C.int(g.a), C.int(g.b), C.int(g.c), C.int(g.d), C.uint(fg), C.uint(bg))
+			continue
+		}
 		ul := fg
 		if sp.Flags.Has(FlagUnderlineColor) {
 			ul = sp.UL

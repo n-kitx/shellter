@@ -157,6 +157,10 @@ rather than rediscovering the state by reading the code.
 
 - [x] Font family setting (`font-family`), falling back to Menlo.
 - [x] Line height (`line-height`, 0.8-3), text centred in the row.
+- [x] Box drawing (U+2500-257F), block elements (U+2580-259F) and Powerline
+      (U+E0B0-E0B7) drawn as shapes, not glyphs (`render/box.go`,
+      `shellterDrawGlyph`): lines reach the cell edges at any line height,
+      double lines join properly, fills have no seams. ~15% on `spans`.
 - [ ] Ligatures, bold-as-bright.
 - [ ] Grapheme clusters: width is per rune plus combining marks, so ZWJ emoji
       and flags take one cell per component (`text/width.go`).

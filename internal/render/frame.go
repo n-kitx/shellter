@@ -178,6 +178,9 @@ type Span struct {
 	FG, BG   uint32
 	UL       uint32
 	Flags    Flags
+	// Glyph is set when the span is one box-drawing, block or Powerline
+	// character, to be drawn as a shape (box.go) rather than as text.
+	Glyph glyph
 }
 
 // spans splits a frame into the stretches to draw, row by row, left to right.
@@ -203,6 +206,16 @@ func spans(f Frame) []Span {
 		for col < f.Cols {
 			first := line[col]
 
+			if isBoxGlyph(first) {
+				g, _ := boxGlyph(first.Rune)
+				out = append(out, Span{
+					Row: row, Col: col, Width: 1, Text: first.Text(),
+					FG: first.FG, BG: first.BG, UL: first.UL, Flags: first.Flags, Glyph: g,
+				})
+				col++
+				continue
+			}
+
 			if first.Wide() {
 				width := 1
 				if col+1 < f.Cols && line[col+1].IsContinuation() {
@@ -225,7 +238,7 @@ func spans(f Frame) []Span {
 			// belong to, so it draws as a blank.
 			for end < f.Cols {
 				c := line[end]
-				if c.Wide() || !sameStyle(c, first) {
+				if isBoxGlyph(c) || c.Wide() || !sameStyle(c, first) {
 					break
 				}
 				switch {

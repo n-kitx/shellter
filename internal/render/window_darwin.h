@@ -103,6 +103,11 @@ void shellterFillCells(int row, int col, int width, unsigned int rgb);
 // Text arrives as a pointer and a length into Go's own memory, valid only for
 // the duration of the call. Copying it into a C string first cost a malloc and
 // a free per span, measured at 10us a frame.
+// shellterDrawGlyph draws a box-drawing, block or Powerline character as a
+// shape filling its cell: kind and a-d are a render.glyph (box.go), rgb its
+// colour and bg the cell's background, which double lines are cut out with.
+void shellterDrawGlyph(int row, int col, int kind, int a, int b, int c, int d, unsigned int rgb,
+                       unsigned int bg);
 // width is how many cells the run covers; ul is the underline's colour.
 void shellterDrawText(int row, int col, int width, const char *utf8, int len, unsigned int rgb,
                       unsigned int flags, unsigned int ul);
