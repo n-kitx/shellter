@@ -31,12 +31,20 @@ const (
 	findFresh findDirection = 0  // the query changed: start again at the newest
 	findOlder findDirection = 1  // Return, Cmd+G: up, towards history
 	findNewer findDirection = -1 // Shift+Return, Cmd+Shift+G: down
+	findDone  findDirection = 2  // the bar closed: stop highlighting
 )
 
 // find looks for query in the focused pane and selects one match: the newest
 // on a fresh search, otherwise the next one in the direction asked, wrapping
 // round at either end. It tells the search bar how it went.
 func (g *GUI) find(query string, dir findDirection) {
+	if dir == findDone {
+		// The match found stays selected, ready to copy; the rest go.
+		g.findQuery = ""
+		render.Redraw()
+		return
+	}
+	g.findQuery = query
 	p := g.current()
 	if p == nil {
 		return
@@ -49,7 +57,7 @@ func (g *GUI) find(query string, dir findDirection) {
 	}
 
 	p.mu.Lock()
-	matches := findAll(p.scr, query)
+	matches := findIn(p.scr, query, g.findCase, p.scr.FirstLine(), p.scr.TotalLines())
 	p.mu.Unlock()
 
 	if len(matches) == 0 {
@@ -91,18 +99,37 @@ func step(matches []match, from screen.Pos, dir findDirection) int {
 }
 
 // findAll lists every match of query in a screen's history and grid, oldest
-// first. Case is ignored. A match does not cross from one row to the next: a
-// word broken by the right edge is not found, which is the price of searching
-// rows rather than rebuilding logical lines on every keystroke.
+// first, ignoring case.
 func findAll(scr *screen.Screen, query string) []match {
-	q := fold([]rune(query))
+	return findIn(scr, query, false, scr.FirstLine(), scr.TotalLines())
+}
+
+// findIn lists the matches of query on lines first up to last, oldest first;
+// case counts only when matchCase is set. A match does not cross from one row
+// to the next: a word broken by the right edge is not found, which is the
+// price of searching rows rather than rebuilding logical lines on every
+// keystroke.
+func findIn(scr *screen.Screen, query string, matchCase bool, first, last int64) []match {
+	q := []rune(query)
+	if !matchCase {
+		q = fold(q)
+	}
 	var out []match
 	var runes []rune
 	var cols []int
 	_, width := scr.Size()
-	for n := scr.FirstLine(); n < scr.TotalLines(); n++ {
+	if first < scr.FirstLine() {
+		first = scr.FirstLine()
+	}
+	if last > scr.TotalLines() {
+		last = scr.TotalLines()
+	}
+	for n := first; n < last; n++ {
 		runes, cols = scr.LineChars(n, runes, cols)
-		line := fold(runes)
+		line := runes
+		if !matchCase {
+			line = fold(runes)
+		}
 		for i := 0; i+len(q) <= len(line); i++ {
 			if !equalRunes(line[i:i+len(q)], q) {
 				continue
@@ -161,4 +188,32 @@ func runeWidth(r rune) int {
 		return 2
 	}
 	return 1
+}
+
+// markMatches tints every match of the search on screen in a pane, so you
+// can see at a glance how many there are and where; the one Find Next is on
+// is the selection, drawn over them. Only the rows in view are searched, so
+// it costs a frame what a screenful costs, however long the history is.
+func (g *GUI) markMatches(p *pane, f render.Frame, top int64) {
+	if g.findQuery == "" || p != g.current() {
+		return
+	}
+	p.mu.Lock()
+	matches := findIn(p.scr, g.findQuery, g.findCase, top, top+int64(f.Rows))
+	p.mu.Unlock()
+
+	tint := mix(g.Palette.ANSI[3], g.Palette.Background, 0.55)
+	for _, m := range matches {
+		if p.sel.active && m.from == p.sel.anchor && m.to == p.sel.head {
+			continue // the current one: already the selection
+		}
+		row := int(m.from.Line - top)
+		for c := m.from.Col; c < m.to.Col && c < f.Cols; c++ {
+			cell := &f.Cells[row*f.Cols+c]
+			cell.BG = tint
+			if cell.FG == tint {
+				cell.FG = g.Palette.Foreground
+			}
+		}
+	}
 }

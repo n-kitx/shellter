@@ -104,9 +104,10 @@ type Config struct {
 	// OnClear reports Cmd+K: clear the focused pane's screen and history.
 	OnClear func()
 	// OnFind searches the focused pane: dir is 0 when the query changed, 1
-	// for Find Next (towards older output) and -1 for Find Previous. The
-	// result is reported back with SetFindStatus.
-	OnFind func(query string, dir int)
+	// for Find Next (towards older output), -1 for Find Previous, and 2 when
+	// the bar closed. matchCase is the bar's Aa toggle. The result is reported
+	// back with SetFindStatus.
+	OnFind func(query string, dir int, matchCase bool)
 	// OnHover follows the pointer over the grid, whether or not a program
 	// asked for mouse reports - it is for the terminal's own use, such as
 	// underlining a link. row is -1 when the pointer leaves. Called again,

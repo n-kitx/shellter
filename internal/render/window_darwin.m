@@ -82,7 +82,7 @@ enum {
     kTabRadius = 7,   // corner radius of a pill
     kNewTabSize = 30, // the "+" button
     kFontMin = 6,     // how far Cmd+- and Cmd+= will go
-    kFindWidth = 380, // the search bar
+    kFindWidth = 410, // the search bar
     kFindHeight = 34,
     kFontMax = 72,
 };
@@ -1604,6 +1604,7 @@ static void titlebarDoubleClicked(NSWindow *window) {
 // way the tab bar's buttons do: a rounded backing under it while hovered,
 // darker while pressed.
 @interface ShellterBarButton : NSButton
+- (void)applyTint;
 @end
 
 @implementation ShellterBarButton {
@@ -1611,8 +1612,11 @@ static void titlebarDoubleClicked(NSWindow *window) {
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
-    if (_hover || [[self cell] isHighlighted]) {
-        NSColor *c = [[self cell] isHighlighted] ? chromeEdge() : chromeButtonHoverBG();
+    BOOL on = [self state] == NSControlStateValueOn;
+    if (_hover || on || [[self cell] isHighlighted]) {
+        NSColor *c = [[self cell] isHighlighted] ? chromeEdge()
+                     : on                         ? [chromeAccent() colorWithAlphaComponent:0.45]
+                                                  : chromeButtonHoverBG();
         [c setFill];
         [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect([self bounds], 1, 1)
                                          xRadius:5
@@ -1623,7 +1627,25 @@ static void titlebarDoubleClicked(NSWindow *window) {
 
 - (void)setHover:(BOOL)hover {
     _hover = hover;
-    [self setContentTintColor:hover ? chromeText() : chromeDim()];
+    [self applyTint];
+}
+
+// applyTint colours the button: bright while hovered or switched on, dim
+// otherwise. A symbol takes the tint; a title ("Aa") has to be given it.
+- (void)applyTint {
+    NSColor *c = (_hover || [self state] == NSControlStateValueOn) ? chromeText() : chromeDim();
+    [self setContentTintColor:c];
+    if ([self image] == nil && [[self title] length] > 0) {
+        NSMutableParagraphStyle *centred = [[[NSMutableParagraphStyle alloc] init] autorelease];
+        [centred setAlignment:NSTextAlignmentCenter];
+        [self setAttributedTitle:[[[NSAttributedString alloc]
+                                     initWithString:[self title]
+                                         attributes:@{
+                                             NSFontAttributeName : [self font],
+                                             NSForegroundColorAttributeName : c,
+                                             NSParagraphStyleAttributeName : centred,
+                                         }] autorelease]];
+    }
     [self setNeedsDisplay:YES];
 }
 
@@ -1660,13 +1682,17 @@ static void titlebarDoubleClicked(NSWindow *window) {
 
 @end
 
-// findQuery is what the search field holds, as Go receives it.
+// gFindCase is the bar's Aa toggle: whether case counts in a match.
+static BOOL gFindCase = NO;
+
+// findQuery is what the search field holds, as Go receives it. dir is 0 for a
+// new query, 1 and -1 for the next match older and newer, 2 for "closed".
 static void sendFind(int dir) {
     const char *q = [[gFindField stringValue] UTF8String];
     if (q == NULL) {
         q = "";
     }
-    shellterGoFind((char *)q, (int)strlen(q), dir);
+    shellterGoFind((char *)q, (int)strlen(q), dir, gFindCase);
 }
 
 static BOOL findOpen(void) { return gFindBar != nil && ![gFindBar isHidden]; }
@@ -1692,6 +1718,7 @@ static void closeFind(void) {
     [gFindBar setHidden:YES];
     [gFindStatus setStringValue:@""];
     [gWindow makeFirstResponder:gView];
+    sendFind(2); // the other matches stop being tinted
 }
 
 // ---------------------------------------------------------------------------
@@ -2010,6 +2037,12 @@ static void dressWindow(NSWindow *window) {
 
 - (void)hideFind:(id)sender {
     closeFind();
+}
+
+- (void)toggleFindCase:(id)sender {
+    gFindCase = [(NSButton *)sender state] == NSControlStateValueOn;
+    [(ShellterBarButton *)sender applyTint];
+    sendFind(0);
 }
 
 - (void)findPrevious:(id)sender {
@@ -2443,11 +2476,11 @@ void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
             initWithFrame:NSMakeRect(0, 0, kFindWidth, kFindHeight)];
         //  [ search field        ] 3 of 12  ^  v  x
         NSSearchField *field = [[NSSearchField alloc]
-            initWithFrame:NSMakeRect(6, 5, kFindWidth - 176, 24)];
+            initWithFrame:NSMakeRect(6, 5, kFindWidth - 206, 24)];
         [field setPlaceholderString:@"Find"];
         [[field cell] setSendsSearchStringImmediately:YES];
         NSTextField *status = [NSTextField labelWithString:@""];
-        [status setFrame:NSMakeRect(kFindWidth - 166, 9, 70, 16)];
+        [status setFrame:NSMakeRect(kFindWidth - 196, 9, 70, 16)];
         [status setAlignment:NSTextAlignmentRight];
         [status setFont:[NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular]];
         [status setTextColor:chromeDim()];
@@ -2473,6 +2506,19 @@ void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
             [b setFrame:NSMakeRect(kFindWidth - 90 + i * 28, 5, 26, 24)];
             [bar addSubview:b];
         }
+        // Aa: match case. A toggle, lit while it is on.
+        ShellterBarButton *aa = [ShellterBarButton buttonWithTitle:@"Aa"
+                                                            target:nil
+                                                            action:@selector(toggleFindCase:)];
+        [aa setButtonType:NSButtonTypePushOnPushOff];
+        [aa setBordered:NO];
+        [aa setFont:[NSFont systemFontOfSize:12 weight:NSFontWeightSemibold]];
+        [aa setContentTintColor:chromeDim()];
+        [aa setToolTip:@"Match case"];
+        [aa setRefusesFirstResponder:YES];
+        [aa applyTint];
+        [aa setFrame:NSMakeRect(kFindWidth - 120, 5, 26, 24)];
+        [bar addSubview:aa];
         [bar setHidden:YES];
         [content addSubview:bar];
         gFindBar = bar;

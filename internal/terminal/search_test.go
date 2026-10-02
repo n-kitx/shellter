@@ -189,3 +189,53 @@ func TestHoverUnderlinesALink(t *testing.T) {
 		t.Fatal("typing did not clear the hover")
 	}
 }
+
+// With Aa on, case counts.
+func TestFindMatchCase(t *testing.T) {
+	g := newTestGUI(5, 20)
+	g.feed("Error\r\nerror\r\nERROR\r\n$ ")
+	for _, c := range []struct {
+		matchCase bool
+		status    string
+	}{{false, "3 of 3"}, {true, "1 of 1"}} {
+		g.findCase = c.matchCase
+		g.find("error", findFresh)
+		if got := matchText(g); got != "error" && c.matchCase {
+			t.Errorf("match case found %q", got)
+		}
+		p := g.current()
+		p.mu.Lock()
+		n := len(findIn(p.scr, "error", c.matchCase, p.scr.FirstLine(), p.scr.TotalLines()))
+		p.mu.Unlock()
+		if want := map[bool]int{false: 3, true: 1}[c.matchCase]; n != want {
+			t.Errorf("matchCase %v: %d matches, want %d", c.matchCase, n, want)
+		}
+	}
+}
+
+// While the bar is open every match on screen is tinted, the current one is
+// the selection, and closing the bar takes the tint away.
+func TestFindTintsEveryMatch(t *testing.T) {
+	g := newTestGUI(4, 20)
+	g.feed("cat dog cat\r\nbird\r\ncat\r\n$ ")
+	g.find("cat", findFresh) // the newest, on row 2, is the selection
+
+	f := g.frame()
+	tint := mix(g.Palette.ANSI[3], g.Palette.Background, 0.55)
+	for _, c := range []struct{ row, col int }{{0, 0}, {0, 2}, {0, 8}, {0, 10}} {
+		if bg := f.CellAt(c.row, c.col).BG; bg != tint {
+			t.Errorf("row %d col %d: background %06x, want the match tint", c.row, c.col, bg)
+		}
+	}
+	if bg := f.CellAt(0, 4).BG; bg == tint {
+		t.Error("'dog' was tinted")
+	}
+	if bg := f.CellAt(2, 0).BG; bg != g.Palette.Selection {
+		t.Errorf("the current match is %06x, want the selection colour", bg)
+	}
+
+	g.find("", findDone)
+	if bg := g.frame().CellAt(0, 0).BG; bg == tint {
+		t.Error("the tint stayed after the bar closed")
+	}
+}

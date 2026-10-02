@@ -124,6 +124,12 @@ type GUI struct {
 	resizing *resizing
 	// hovered is the link under the pointer, and hoverRunes/hoverCols the
 	// scratch for reading the line it is on. UI thread only.
+	// findQuery is what the search bar is looking for while it is open, and
+	// findCase whether case counts; every match on screen is tinted
+	// (markMatches). UI thread only.
+	findQuery string
+	findCase  bool
+
 	hovered    linkHover
 	hoverRunes []rune
 	hoverCols  []int
@@ -226,17 +232,20 @@ func (g *GUI) Run() (int, error) {
 		OnPaste:       g.paste,
 		OnSelectAll:   g.selectAll,
 		OnClear:       g.clear,
-		OnFind:        func(q string, dir int) { g.find(q, findDirection(dir)) },
-		OnHover:       g.hover,
-		OnDrop:        g.drop,
-		OnTabRename:   g.renameTab,
-		OnTabMove:     g.moveTab,
-		OnSwapPane:    g.swapPane,
-		OnPaneToTab:   g.paneToTab,
-		OnZoomPane:    g.zoomPane,
-		OnAppearance:  g.appearance,
-		OnSettings:    g.openSettings,
-		CanQuit:       g.canQuit,
+		OnFind: func(q string, dir int, matchCase bool) {
+			g.findCase = matchCase
+			g.find(q, findDirection(dir))
+		},
+		OnHover:      g.hover,
+		OnDrop:       g.drop,
+		OnTabRename:  g.renameTab,
+		OnTabMove:    g.moveTab,
+		OnSwapPane:   g.swapPane,
+		OnPaneToTab:  g.paneToTab,
+		OnZoomPane:   g.zoomPane,
+		OnAppearance: g.appearance,
+		OnSettings:   g.openSettings,
+		CanQuit:      g.canQuit,
 	})
 
 	// The window is gone. When it went because the last tab closed, the next
@@ -719,6 +728,7 @@ func (g *GUI) draw() render.Layout {
 
 		f := g.Palette.FrameInto(snap, pl.pane.frameCells, marked)
 		pl.pane.frameCells = f.Cells
+		g.markMatches(pl.pane, f, snap.TopLine)
 		g.markLink(pl.pane, f, snap.TopLine)
 		if g.blink(&f, snap, pl.pane == focus) {
 			blinking = true

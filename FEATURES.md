@@ -94,9 +94,10 @@ rather than rediscovering the state by reading the code.
 
 ## Scrollback and selection
 
-- [x] Search (Cmd+F, Cmd+G, Cmd+Shift+G, and ↑ ↓ × buttons in the bar):
-      whole history, case-insensitive, current match selected. Matches do not cross a row boundary; only the
-      current match is highlighted.
+- [x] Search (Cmd+F, Cmd+G, Cmd+Shift+G, and Aa ↑ ↓ × buttons in the bar):
+      whole history, case-insensitive unless Aa is on, current match selected
+      and every other match on screen tinted while the bar is open. Matches
+      do not cross a row boundary. No regex yet.
 - [x] Scroll thumb: shown while the view is in history and for a second after
       it moves, and whenever the pointer is over the pane's right edge, where
       it widens; drag it, or click its track to jump there.

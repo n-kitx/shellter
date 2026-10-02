@@ -711,9 +711,9 @@ func shellterGoDrop(row, col C.int, text *C.char, n C.int, files C.int) {
 // Previous.
 //
 //export shellterGoFind
-func shellterGoFind(query *C.char, n C.int, dir C.int) {
+func shellterGoFind(query *C.char, n C.int, dir C.int, matchCase C.int) {
 	if cfg := config(); cfg != nil && cfg.OnFind != nil {
-		cfg.OnFind(C.GoStringN(query, n), int(dir))
+		cfg.OnFind(C.GoStringN(query, n), int(dir), matchCase != 0)
 	}
 }
 

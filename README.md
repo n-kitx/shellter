@@ -844,7 +844,9 @@ the pane is where you are. **Return** (or Cmd+G) steps to older matches,
 **Shift+Return** (or Cmd+Shift+G) to newer ones, both wrapping round, and the
 bar says "3 of 12". **Escape** closes it. The bar's ↑ and ↓ buttons do what
 Return and Shift+Return do, and × closes it; they use the system's own
-symbols, so the bar looks like every other find bar on the Mac.
+symbols, so the bar looks like every other find bar on the Mac. **Aa** makes
+case count. While the bar is open, every other match on screen is tinted, so
+you can see where they all are; closing it takes the tint away.
 
 The match is shown by making it the selection, so there is nothing extra to
 draw and Cmd+C copies what was found. Matches are found again on every step
