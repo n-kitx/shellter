@@ -1,6 +1,7 @@
 package screen
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -88,15 +89,34 @@ func sgrFor(a Attr) string {
 		flag Flags
 		code string
 	}{
-		{FlagBold, "1"}, {FlagFaint, "2"}, {FlagItalic, "3"}, {FlagUnderline, "4"},
+		{FlagBold, "1"}, {FlagFaint, "2"}, {FlagItalic, "3"},
 		{FlagBlink, "5"}, {FlagInverse, "7"}, {FlagHidden, "8"}, {FlagStrike, "9"},
 	} {
 		if a.Flags.Has(f.flag) {
 			params = append(params, f.code)
 		}
 	}
+	switch {
+	case !a.Flags.Has(FlagUnderline):
+	case a.Flags.Has(FlagUnderlineDouble):
+		params = append(params, "4:2")
+	case a.Flags.Has(FlagUnderlineCurly):
+		params = append(params, "4:3")
+	case a.Flags.Has(FlagUnderlineDotted):
+		params = append(params, "4:4")
+	case a.Flags.Has(FlagUnderlineDashed):
+		params = append(params, "4:5")
+	default:
+		params = append(params, "4")
+	}
 	params = appendColor(params, a.FG, 30, 38)
 	params = appendColor(params, a.BG, 40, 48)
+	switch a.UL.Kind {
+	case ColorIndexed:
+		params = append(params, "58:5:"+strconv.Itoa(int(a.UL.Index)))
+	case ColorRGB:
+		params = append(params, fmt.Sprintf("58:2::%d:%d:%d", a.UL.R, a.UL.G, a.UL.B))
+	}
 	return "\x1b[" + strings.Join(params, ";") + "m"
 }
 

@@ -43,7 +43,17 @@ const (
 	FlagInverse
 	FlagHidden
 	FlagStrike
+	// The underline's shape, alongside FlagUnderline and at most one of them;
+	// none of them means a single straight line. SGR 4:2 to 4:5.
+	FlagUnderlineDouble
+	FlagUnderlineCurly
+	FlagUnderlineDotted
+	FlagUnderlineDashed
 )
+
+// underlineFlags is every flag that says something about the underline.
+const underlineFlags = FlagUnderline | FlagUnderlineDouble | FlagUnderlineCurly |
+	FlagUnderlineDotted | FlagUnderlineDashed
 
 // Has reports whether every flag in f is set.
 func (fl Flags) Has(f Flags) bool { return fl&f == f }
@@ -53,5 +63,8 @@ func (fl Flags) Has(f Flags) bool { return fl&f == f }
 // after the pen has changed.
 type Attr struct {
 	FG, BG Color
-	Flags  Flags
+	// UL is the underline's own colour (SGR 58), or the default - the text's.
+	// Editors draw red squiggles for errors and yellow ones for warnings.
+	UL    Color
+	Flags Flags
 }

@@ -114,6 +114,7 @@ type Cell struct {
 	Comb   string // combining marks attached to Rune, usually empty
 	Rune   rune
 	FG, BG uint32 // 0xRRGGBB
+	UL     uint32 // the underline's colour, when FlagUnderlineColor is set
 	Flags  Flags
 }
 
@@ -135,7 +136,7 @@ func (c Cell) Text() string {
 // "foreground equals background". Blink is kept so that the application can
 // find blinking text and hide it on the off beat, the same way; the window
 // never looks at it.
-type Flags uint8
+type Flags uint16
 
 const (
 	FlagBold Flags = 1 << iota
@@ -143,6 +144,15 @@ const (
 	FlagUnderline
 	FlagStrike
 	FlagBlink
+	// The underline's shape, with FlagUnderline; none of them is a straight
+	// single line.
+	FlagUnderlineDouble
+	FlagUnderlineCurly
+	FlagUnderlineDotted
+	FlagUnderlineDashed
+	// FlagUnderlineColor says Cell.UL is the underline's colour; without it
+	// the underline is drawn in the text's.
+	FlagUnderlineColor
 )
 
 // Has reports whether every flag in f is set.
@@ -166,6 +176,7 @@ type Span struct {
 	Width    int // in cells, which is not len(Text) once wide characters appear
 	Text     string
 	FG, BG   uint32
+	UL       uint32
 	Flags    Flags
 }
 
@@ -199,7 +210,7 @@ func spans(f Frame) []Span {
 				}
 				out = append(out, Span{
 					Row: row, Col: col, Width: width, Text: first.Text(),
-					FG: first.FG, BG: first.BG, Flags: first.Flags,
+					FG: first.FG, BG: first.BG, UL: first.UL, Flags: first.Flags,
 				})
 				col += width
 				continue
@@ -234,7 +245,7 @@ func spans(f Frame) []Span {
 			}
 			out = append(out, Span{
 				Row: row, Col: col, Width: end - col, Text: b.String(),
-				FG: first.FG, BG: first.BG, Flags: first.Flags,
+				FG: first.FG, BG: first.BG, UL: first.UL, Flags: first.Flags,
 			})
 			col = end
 		}
@@ -243,7 +254,7 @@ func spans(f Frame) []Span {
 }
 
 func sameStyle(a, b Cell) bool {
-	return a.FG == b.FG && a.BG == b.BG && a.Flags == b.Flags
+	return a.FG == b.FG && a.BG == b.BG && a.Flags == b.Flags && a.UL == b.UL
 }
 
 // blank reports whether a run needs no text drawn: all spaces, so the

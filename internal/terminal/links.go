@@ -158,6 +158,7 @@ func (g *GUI) markLink(p *pane, f render.Frame, top int64) {
 	for c := h.from; c < h.to && c < f.Cols; c++ {
 		cell := &f.Cells[row*f.Cols+c]
 		cell.Flags |= render.FlagUnderline
+		cell.Flags &^= render.FlagUnderlineColor // the link's blue, not the program's
 		cell.FG = colour
 	}
 }

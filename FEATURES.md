@@ -89,6 +89,11 @@ rather than rediscovering the state by reading the code.
 - [x] BEL: `bell = sound | flash | both | off`; a background tab gets a bell
       mark until looked at, the Dock bounces once if Shellter is not in front.
       At most one bell per pane per 200 ms (`terminal/overlays.go`).
+- [x] Colon sub-parameters (`parser.Event.Sub`): `4:3`, `38:2::r:g:b`,
+      `58:5:n`. Underline styles - single, double (`4:2`, `21`), wavy, dotted,
+      dashed - and underline colour (`58`/`59`), drawn by `shellterDrawText`
+      (the wave is a path). Cells grew 32 -> 40 bytes for the colour: ~7-10%
+      off Apply throughput, ~25% more history memory.
 - [x] Blink: SGR 5 text blinks, hidden on the off beat (`terminal/blink.go`).
       One 530 ms timer, which redraws only while something blinks.
 
@@ -156,7 +161,7 @@ rather than rediscovering the state by reading the code.
 - [ ] Grapheme clusters: width is per rune plus combining marks, so ZWJ emoji
       and flags take one cell per component (`text/width.go`).
 - [ ] GPU (Metal) rendering. Today it is `NSString drawAtPoint:` per run.
-- [ ] Throughput: the screen parses at ~41 MB/s against a PTY that can deliver
+- [ ] Throughput: the screen parses at ~37-43 MB/s against a PTY that can deliver
       ~193. The next profile starts at `Screen.print`.
 
 ## Configuration

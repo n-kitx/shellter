@@ -355,3 +355,28 @@ func TestOversizedStringIsSwallowed(t *testing.T) {
 		t.Fatalf("an oversized OSC leaked %d events, first %v", len(got), got[0])
 	}
 }
+
+// A ':' separates sub-parameters: the SGR forms for underline styles and
+// colours. Which parameters followed a ':' is in Sub.
+func TestColonSubParameters(t *testing.T) {
+	for _, c := range []struct {
+		in     string
+		params []int
+		sub    uint32
+	}{
+		{"\x1b[4:3m", []int{4, 3}, 0b10},
+		{"\x1b[4;3m", []int{4, 3}, 0},
+		{"\x1b[38:2::255:128:0m", []int{38, 2, 0, 255, 128, 0}, 0b111110},
+		{"\x1b[1;58:5:196;4:0m", []int{1, 58, 5, 196, 4, 0}, 0b101100},
+		{"\x1b[4:m", []int{4, 0}, 0b10},
+	} {
+		var got []Event
+		New().Parse([]byte(c.in), func(e Event) { got = append(got, e.Clone()) })
+		if len(got) != 1 || got[0].Kind != EventCSI {
+			t.Fatalf("%q: %v", c.in, got)
+		}
+		if !reflect.DeepEqual(got[0].Params, c.params) || got[0].Sub != c.sub {
+			t.Errorf("%q: params %v sub %b, want %v %b", c.in, got[0].Params, got[0].Sub, c.params, c.sub)
+		}
+	}
+}

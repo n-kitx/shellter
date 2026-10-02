@@ -70,7 +70,7 @@ const (
 // Limits borrowed from real terminals: a sequence that exceeds them is
 // malformed, and we must not let a hostile or buggy program grow our buffers.
 const (
-	maxParams   = 16
+	maxParams   = 32 // and Event.Sub has a bit for each
 	maxParamVal = 65535
 	// maxStringLen bounds an OSC or DCS payload. Large, because OSC 52 carries
 	// a whole clipboard in base64; a string longer than this is swallowed
@@ -92,6 +92,8 @@ type Parser struct {
 	params        []int
 	param         int
 	paramPending  bool // have we seen digits or ';' for the current parameter?
+	sub           uint32
+	subNext       bool // the parameter being read followed a ':'
 	intermediates []byte
 
 	// String accumulators, shared by OSC and DCS.
@@ -240,6 +242,7 @@ func (p *Parser) escape(b byte, emit func(Event)) {
 //
 //	'0'-'9'    -> digits of the current parameter
 //	';'        -> end of the current parameter
+//	':'        -> end of it, and the next one is its sub-parameter
 //	0x3C-0x3F  -> private marker, e.g. the '?' in ESC[?25l
 //	0x20-0x2F  -> intermediate byte
 //	0x40-0x7E  -> final byte: the command. Emit and return to Ground.
@@ -255,6 +258,10 @@ func (p *Parser) csi(b byte, emit func(Event)) {
 		p.paramPending = true
 	case b == ';':
 		p.pushParam()
+	case b == ':':
+		p.pushParam()
+		p.subNext = true
+		p.paramPending = true // "4:" has an empty sub-parameter, which is 0
 	case b >= 0x3c && b <= 0x3f:
 		p.private = b
 	case b >= 0x20 && b <= 0x2f:
@@ -267,6 +274,7 @@ func (p *Parser) csi(b byte, emit func(Event)) {
 			Kind:          EventCSI,
 			Private:       p.private,
 			Params:        orNilInts(p.params),
+			Sub:           p.sub,
 			Intermediates: orNilBytes(p.intermediates),
 			Command:       b,
 		})
@@ -357,15 +365,21 @@ func (p *Parser) resetSequence() {
 	p.params = p.params[:0]
 	p.param = 0
 	p.paramPending = false
+	p.sub = 0
+	p.subNext = false
 	p.intermediates = p.intermediates[:0]
 }
 
 func (p *Parser) pushParam() {
 	if len(p.params) < maxParams {
+		if p.subNext {
+			p.sub |= 1 << len(p.params)
+		}
 		p.params = append(p.params, p.param)
 	}
 	p.param = 0
 	p.paramPending = false
+	p.subNext = false
 }
 
 // orNilInts and orNilBytes hand out nil rather than an empty slice, so that

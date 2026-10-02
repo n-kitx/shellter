@@ -741,7 +741,7 @@ func (s *Screen) csi(e parser.Event) {
 
 	// --- appearance ---
 	case 'm': // SGR - colours and styles
-		s.pen.applySGR(e.Params)
+		s.pen.applySGR(e.Params, e.Sub)
 
 	case 'b': // REP - repeat the last printed character
 		s.repeatLast(e.Param(0, 1))

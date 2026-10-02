@@ -411,8 +411,15 @@ func drawPane(p Pane, defaultBG uint32, faded bool) {
 		if sp.blank() {
 			continue // the fill said everything there was to say
 		}
-		C.shellterDrawText(C.int(row+sp.Row), C.int(col+sp.Col),
-			bytesOf(sp.Text), C.int(len(sp.Text)), C.uint(fg), C.uint(sp.Flags))
+		ul := fg
+		if sp.Flags.Has(FlagUnderlineColor) {
+			ul = sp.UL
+			if faded {
+				ul = fade(ul, defaultBG)
+			}
+		}
+		C.shellterDrawText(C.int(row+sp.Row), C.int(col+sp.Col), C.int(sp.Width),
+			bytesOf(sp.Text), C.int(len(sp.Text)), C.uint(fg), C.uint(sp.Flags), C.uint(ul))
 	}
 
 	// Only the focused pane shows a cursor: two cursors on screen would both

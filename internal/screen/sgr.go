@@ -4,7 +4,12 @@ package screen
 // colours and styles. Its parameters are read left to right, each one changing
 // part of the pen, which is why "ESC [ 1;31m" means bold *and* red rather than
 // one replacing the other.
-func (a *Attr) applySGR(params []int) {
+//
+// sub marks the parameters that followed a ':' (parser.Event.Sub). Those
+// belong to the parameter before them: "4:3" is underline style 3, wavy, and
+// "38:2::r:g:b" a colour - the newer, unambiguous spellings of what ';' says
+// with "4" and "38;2;r;g;b".
+func (a *Attr) applySGR(params []int, sub uint32) {
 	// No parameters at all means reset: "ESC [ m" is "ESC [ 0 m".
 	if len(params) == 0 {
 		*a = Attr{}
@@ -13,6 +18,16 @@ func (a *Attr) applySGR(params []int) {
 
 	for i := 0; i < len(params); i++ {
 		p := params[i]
+		// The sub-parameters that go with this one, if any.
+		end := i + 1
+		for end < len(params) && end < 32 && sub&(1<<end) != 0 {
+			end++
+		}
+		if subs := params[i+1 : end]; len(subs) > 0 {
+			a.applyColonSGR(p, subs)
+			i = end - 1
+			continue
+		}
 		switch {
 		case p == 0:
 			*a = Attr{}
@@ -23,7 +38,7 @@ func (a *Attr) applySGR(params []int) {
 		case p == 3:
 			a.Flags |= FlagItalic
 		case p == 4:
-			a.Flags |= FlagUnderline
+			a.setUnderline(1)
 		case p == 5, p == 6:
 			a.Flags |= FlagBlink
 		case p == 7:
@@ -35,12 +50,16 @@ func (a *Attr) applySGR(params []int) {
 
 		// The "turn it off again" parameters. 22 clears both bold and faint,
 		// because they are two ends of one VT100 intensity setting.
-		case p == 21, p == 22:
+		// 21 is a double underline (ECMA-48, and xterm, kitty and Ghostty);
+		// the Linux console's "bold off" reading of it lost that argument.
+		case p == 21:
+			a.setUnderline(2)
+		case p == 22:
 			a.Flags &^= FlagBold | FlagFaint
 		case p == 23:
 			a.Flags &^= FlagItalic
 		case p == 24:
-			a.Flags &^= FlagUnderline
+			a.setUnderline(0)
 		case p == 25:
 			a.Flags &^= FlagBlink
 		case p == 27:
@@ -82,7 +101,72 @@ func (a *Attr) applySGR(params []int) {
 			} else {
 				return
 			}
+		case p == 58: // the underline's colour, spelled like 38's
+			if c, used, ok := extendedColor(params[i:]); ok {
+				a.UL = c
+				i += used - 1
+			} else {
+				return
+			}
+		case p == 59:
+			a.UL = Color{}
 		}
+	}
+}
+
+// applyColonSGR applies one parameter that came with sub-parameters.
+func (a *Attr) applyColonSGR(p int, subs []int) {
+	switch p {
+	case 4: // 4:0 none, 4:1 single, 4:2 double, 4:3 wavy, 4:4 dotted, 4:5 dashed
+		a.setUnderline(subs[0])
+	case 38, 48, 58:
+		c, ok := colonColor(subs)
+		if !ok {
+			return
+		}
+		switch p {
+		case 38:
+			a.FG = c
+		case 48:
+			a.BG = c
+		default:
+			a.UL = c
+		}
+	}
+}
+
+// colonColor reads a colour's sub-parameters: "5:n" for palette entry n, and
+// "2:r:g:b" or "2:id:r:g:b" for a direct colour, where id is the colour space
+// ECMA-48 put there and everyone leaves empty.
+func colonColor(subs []int) (Color, bool) {
+	switch {
+	case subs[0] == 5 && len(subs) >= 2:
+		return Indexed(clampByte(subs[1])), true
+	case subs[0] == 2 && len(subs) >= 5:
+		return RGB(clampByte(subs[2]), clampByte(subs[3]), clampByte(subs[4])), true
+	case subs[0] == 2 && len(subs) == 4:
+		return RGB(clampByte(subs[1]), clampByte(subs[2]), clampByte(subs[3])), true
+	}
+	return Color{}, false
+}
+
+// setUnderline sets the underline's style: 0 none, 1 single, 2 double, 3 wavy,
+// 4 dotted, 5 dashed. A style it does not know is a single line, so the text
+// is still marked as the program meant.
+func (a *Attr) setUnderline(style int) {
+	a.Flags &^= underlineFlags
+	switch style {
+	case 0:
+	case 2:
+		a.Flags |= FlagUnderline | FlagUnderlineDouble
+	case 3:
+		a.Flags |= FlagUnderline | FlagUnderlineCurly
+	case 4:
+		a.Flags |= FlagUnderline | FlagUnderlineDotted
+	case 5:
+		a.Flags |= FlagUnderline | FlagUnderlineDashed
+	default:
+		a.Flags |= FlagUnderline
 	}
 }
 

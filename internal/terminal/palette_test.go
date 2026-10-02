@@ -150,3 +150,24 @@ func TestErasedRegionKeepsItsBackground(t *testing.T) {
 		}
 	}
 }
+
+// An underline's style and colour reach the renderer: the colour resolved
+// like any other, and runs that differ only in it drawn apart.
+func TestUnderlineStyleAndColourReachTheRenderer(t *testing.T) {
+	p := DefaultPalette()
+	s := screen.New(1, 10)
+	ps := parser.New()
+	ps.Parse([]byte("\x1b[4:3;58:5:1mab\x1b[58:5:3mcd\x1b[4mef\x1b[0m"), s.Apply)
+	f := p.Frame(s.Snapshot())
+
+	wavy := f.CellAt(0, 0)
+	if !wavy.Flags.Has(render.FlagUnderline|render.FlagUnderlineCurly|render.FlagUnderlineColor) || wavy.UL != p.ANSI[1] {
+		t.Errorf("a red wavy underline came out as flags %b ul %06x", wavy.Flags, wavy.UL)
+	}
+	if c := f.CellAt(0, 2); c.UL != p.ANSI[3] {
+		t.Errorf("the yellow one came out %06x", c.UL)
+	}
+	if c := f.CellAt(0, 4); c.Flags.Has(render.FlagUnderlineCurly) || !c.Flags.Has(render.FlagUnderlineColor) {
+		t.Errorf("4 after a wavy one: flags %b; want straight, still coloured", c.Flags)
+	}
+}

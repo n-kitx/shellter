@@ -124,12 +124,19 @@ func (p Palette) FrameInto(snap screen.Snapshot, buf []render.Cell, sel []span) 
 			}
 		}
 
+		flags := renderFlags(c.Attr.Flags)
+		var ul uint32
+		if c.Attr.UL.Kind != screen.ColorDefault && flags.Has(render.FlagUnderline) {
+			ul = p.resolve(c.Attr.UL, fg)
+			flags |= render.FlagUnderlineColor
+		}
 		cells[i] = render.Cell{
 			Rune:  c.Rune,
 			Comb:  c.Comb,
 			FG:    fg,
 			BG:    bg,
-			Flags: renderFlags(c.Attr.Flags),
+			UL:    ul,
+			Flags: flags,
 		}
 	}
 
@@ -174,6 +181,16 @@ func renderFlags(f screen.Flags) render.Flags {
 	}
 	if f.Has(screen.FlagUnderline) {
 		out |= render.FlagUnderline
+		switch {
+		case f.Has(screen.FlagUnderlineDouble):
+			out |= render.FlagUnderlineDouble
+		case f.Has(screen.FlagUnderlineCurly):
+			out |= render.FlagUnderlineCurly
+		case f.Has(screen.FlagUnderlineDotted):
+			out |= render.FlagUnderlineDotted
+		case f.Has(screen.FlagUnderlineDashed):
+			out |= render.FlagUnderlineDashed
+		}
 	}
 	if f.Has(screen.FlagStrike) {
 		out |= render.FlagStrike

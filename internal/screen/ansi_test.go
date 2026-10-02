@@ -311,3 +311,60 @@ func TestOSC7RecordsTheDirectory(t *testing.T) {
 		t.Fatalf("RIS lost the directory: %q", path)
 	}
 }
+
+// Underline styles and colours, in both spellings: what Neovim and Helix send
+// for diagnostics, and delta and bat for colours.
+func TestUnderlineStylesAndColours(t *testing.T) {
+	cases := []struct {
+		in    string
+		flags Flags
+		ul    Color
+		fg    Color
+	}{
+		{"\x1b[4m", FlagUnderline, Color{}, Color{}},
+		{"\x1b[4:0m", 0, Color{}, Color{}},
+		{"\x1b[4:1m", FlagUnderline, Color{}, Color{}},
+		{"\x1b[4:2m", FlagUnderline | FlagUnderlineDouble, Color{}, Color{}},
+		{"\x1b[21m", FlagUnderline | FlagUnderlineDouble, Color{}, Color{}},
+		{"\x1b[4:3m", FlagUnderline | FlagUnderlineCurly, Color{}, Color{}},
+		{"\x1b[4:4m", FlagUnderline | FlagUnderlineDotted, Color{}, Color{}},
+		{"\x1b[4:5m", FlagUnderline | FlagUnderlineDashed, Color{}, Color{}},
+		{"\x1b[4:3;58:2::255:0:0m", FlagUnderline | FlagUnderlineCurly, RGB(255, 0, 0), Color{}},
+		{"\x1b[4;58;5;196m", FlagUnderline, Indexed(196), Color{}},
+		{"\x1b[4;58:2:1:2:3m", FlagUnderline, RGB(1, 2, 3), Color{}},
+		{"\x1b[38:2::10:20:30m", 0, Color{}, RGB(10, 20, 30)},
+		{"\x1b[38:5:200m", 0, Color{}, Indexed(200)},
+		// "4;3" is underline then italic, not a wavy underline.
+		{"\x1b[4;3m", FlagUnderline | FlagItalic, Color{}, Color{}},
+	}
+	for _, c := range cases {
+		s := New(2, 10)
+		feed(s, c.in+"x")
+		a := s.Cell(0, 0).Attr
+		if a.Flags != c.flags || a.UL != c.ul || a.FG != c.fg {
+			t.Errorf("%q: flags %b ul %+v fg %+v, want %b %+v %+v", c.in, a.Flags, a.UL, a.FG, c.flags, c.ul, c.fg)
+		}
+	}
+
+	// 24 takes every kind of underline away, 59 the colour, 0 both.
+	s := New(2, 10)
+	feed(s, "\x1b[4:3;58:5:1mA\x1b[24mB\x1b[4:2mC\x1b[59mD\x1b[0mE")
+	if a := s.Cell(0, 1).Attr; a.Flags&underlineFlags != 0 || a.UL != Indexed(1) {
+		t.Errorf("after 24: %+v", a)
+	}
+	if a := s.Cell(0, 3).Attr; a.Flags != FlagUnderline|FlagUnderlineDouble || a.UL != (Color{}) {
+		t.Errorf("after 59: %+v", a)
+	}
+	if a := s.Cell(0, 4).Attr; a != (Attr{}) {
+		t.Errorf("after 0: %+v", a)
+	}
+
+	// A session transcript keeps them.
+	saved := New(2, 10)
+	feed(saved, "\x1b[4:3;58:2::255:0:0mwavy\x1b[0m")
+	back := New(2, 10)
+	feed(back, saved.Transcript(10))
+	if got, want := back.Cell(0, 0).Attr, saved.Cell(0, 0).Attr; got != want {
+		t.Errorf("transcript: %+v, want %+v", got, want)
+	}
+}

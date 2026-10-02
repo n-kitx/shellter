@@ -192,6 +192,10 @@ enum {
     kFlagItalic = 1 << 1,
     kFlagUnderline = 1 << 2,
     kFlagStrike = 1 << 3,
+    kFlagUnderlineDouble = 1 << 5,
+    kFlagUnderlineCurly = 1 << 6,
+    kFlagUnderlineDotted = 1 << 7,
+    kFlagUnderlineDashed = 1 << 8,
 };
 
 static NSColor *colorFromRGB(unsigned int rgb) {
@@ -2776,8 +2780,33 @@ static NSString *stringFrom(const char *utf8, int len) {
                                    encoding:NSUTF8StringEncoding] autorelease];
 }
 
-void shellterDrawText(int row, int col, const char *utf8, int len,
-                      unsigned int rgb, unsigned int flags) {
+// drawWave draws the wavy underline - an error or a misspelling in an editor
+// - under width cells. AppKit has no such underline style, so it is a path:
+// half-waves two points long, a point and a half either side of where a
+// straight underline would sit.
+static void drawWave(int row, int col, int width, NSColor *color) {
+    NSPoint o = textOrigin(row, col);
+    double y = o.y + [gFont ascender] - [gFont underlinePosition] + 1;
+    double maxY = cellOrigin(row, col).y + gLineHeight - 1.5;
+    if (y > maxY) {
+        y = maxY; // a tight line height: keep it inside the row
+    }
+    double x = o.x, end = o.x + width * gCharWidth, half = 2, amp = 1.5;
+    NSBezierPath *wave = [NSBezierPath bezierPath];
+    [wave moveToPoint:NSMakePoint(x, y)];
+    for (int i = 0; x < end; i++, x += half) {
+        double peak = (i % 2 == 0) ? y - amp : y + amp;
+        [wave curveToPoint:NSMakePoint(x + half, y)
+             controlPoint1:NSMakePoint(x + half / 2, peak)
+             controlPoint2:NSMakePoint(x + half / 2, peak)];
+    }
+    [wave setLineWidth:1];
+    [color setStroke];
+    [wave stroke];
+}
+
+void shellterDrawText(int row, int col, int width, const char *utf8, int len, unsigned int rgb,
+                      unsigned int flags, unsigned int ul) {
     NSString *text = stringFrom(utf8, len);
     if (text == nil) {
         return;
@@ -2786,13 +2815,26 @@ void shellterDrawText(int row, int col, const char *utf8, int len,
         NSFontAttributeName : fontForFlags(flags),
         NSForegroundColorAttributeName : colorFromRGB(rgb),
     } mutableCopy] autorelease];
-    if (flags & kFlagUnderline) {
-        attrs[NSUnderlineStyleAttributeName] = @(NSUnderlineStyleSingle);
+    BOOL wavy = (flags & kFlagUnderline) && (flags & kFlagUnderlineCurly);
+    if ((flags & kFlagUnderline) && !wavy) {
+        NSUnderlineStyle style = NSUnderlineStyleSingle;
+        if (flags & kFlagUnderlineDouble) {
+            style = NSUnderlineStyleDouble;
+        } else if (flags & kFlagUnderlineDotted) {
+            style |= NSUnderlineStylePatternDot;
+        } else if (flags & kFlagUnderlineDashed) {
+            style |= NSUnderlineStylePatternDash;
+        }
+        attrs[NSUnderlineStyleAttributeName] = @(style);
+        attrs[NSUnderlineColorAttributeName] = colorFromRGB(ul);
     }
     if (flags & kFlagStrike) {
         attrs[NSStrikethroughStyleAttributeName] = @(NSUnderlineStyleSingle);
     }
     [text drawAtPoint:textOrigin(row, col) withAttributes:attrs];
+    if (wavy) {
+        drawWave(row, col, width, colorFromRGB(ul));
+    }
 }
 
 // The cursor is drawn last, over the text.

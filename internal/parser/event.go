@@ -77,6 +77,12 @@ type Event struct {
 	// business, not the parser's.
 	Params []int
 
+	// Sub marks the parameters that were sub-parameters: bit i is set when
+	// Params[i] followed a ':' rather than a ';'. "ESC [ 4:3 m" (a wavy
+	// underline) is Params [4 3] with bit 1 set, which is how it differs from
+	// "ESC [ 4;3 m" (underline, then italic).
+	Sub uint32
+
 	// Intermediates are the rarely used bytes in the 0x20-0x2F range that may
 	// appear before the final byte, e.g. the '$' in ESC[1$p.
 	Intermediates []byte
