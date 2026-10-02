@@ -33,6 +33,11 @@ type tab struct {
 	// rang says a program in this tab rang the bell while the tab was in the
 	// background. Cleared, like activity, when the tab is looked at.
 	rang bool
+	// zoomed is the pane enlarged to fill the tab for now (Cmd+Shift+Return),
+	// or nil. The others keep their places in the tree and their shells, and
+	// come back exactly as they were. Guarded by the GUI's lock.
+	zoomed *pane
+
 	// quietUntil is when printing here starts to count as activity. A
 	// restored tab's shell starts up behind the one in front, and its first
 	// prompt is not news.
@@ -121,8 +126,21 @@ type placed struct {
 // from anywhere that does not care.
 func (t *tab) layout(r rect, panes []placed, lines []divider) ([]placed, []divider) {
 	panes, lines = panes[:0], lines[:0]
+	if t.zoomed != nil {
+		// The whole tab, and no dividers. Everything that asks where panes
+		// are - drawing, clicks, sizes - asks here, so the hidden ones are
+		// simply not anywhere until the zoom ends.
+		return append(panes, placed{pane: t.zoomed, rect: r}), lines
+	}
 	t.root.place(r, &panes, &lines)
 	return panes, lines
+}
+
+// unzoom ends a zoom, reporting whether there was one.
+func (t *tab) unzoom() bool {
+	was := t.zoomed != nil
+	t.zoomed = nil
+	return was
 }
 
 // divider is a line between two panes, one cell thick.
@@ -212,6 +230,7 @@ func (n *node) walk(fn func(*node)) {
 // split replaces the focused pane with a branch holding it and next, and moves
 // the focus to the new pane - which is where a person's attention already is.
 func (t *tab) split(next *pane, dir splitDir) {
+	t.unzoom() // a new pane belongs beside the others, all of them shown
 	leaf := t.leafOf(t.focus)
 	if leaf == nil {
 		return
@@ -232,6 +251,9 @@ func (t *tab) split(next *pane, dir splitDir) {
 func (t *tab) remove(p *pane) bool {
 	if t.root == nil {
 		return false
+	}
+	if t.zoomed == p {
+		t.zoomed = nil
 	}
 	if t.root.pane == p {
 		t.root = nil

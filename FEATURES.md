@@ -140,6 +140,9 @@ rather than rediscovering the state by reading the code.
 - [x] Unfocused panes fade their colours towards the background instead of
       being covered by a dark wash (which left boxed-in panes with light
       borders).
+- [x] Zoom a pane (Cmd+Shift+Return, Split > Zoom Pane, checked while on):
+      it fills the tab, the others keep their shells and places. Moving the
+      focus, swapping, splitting or closing the zoomed pane ends it.
 - [x] Swap panes (Cmd+Option+Shift+arrows); Split > Move Pane to New Tab.
       Nothing restarts - the pane moves between trees, and its reader looks
       its tab up rather than remembering it (`GUI.tabOf`).
@@ -159,6 +162,8 @@ rather than rediscovering the state by reading the code.
 
 - [x] Live reload of the settings file and theme files (1 s poll).
 - [x] Custom themes: a file in `themes/` beside the settings file.
+- [x] Follow macOS light/dark: `theme = light:NAME,dark:NAME` switches as the
+      system does (KVO on the app's effectiveAppearance).
 - [x] Cursor style and blink settings (`cursor-style`, `cursor-blink`); a
       program's DECSCUSR wins until it sends `ESC [ 0 SP q`. Blinks only in the
       focused pane of a focused window, held steady while typing.

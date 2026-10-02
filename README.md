@@ -745,6 +745,7 @@ see, so that switching to one never shows a grid of the wrong shape.
 | `Cmd+Shift+D` | split it downwards |
 | `Cmd+Option+←↑↓→` | move the focus to the neighbouring pane |
 | `Cmd+Option+Shift+←↑↓→` | swap the focused pane with that neighbour |
+| `Cmd+Shift+Return` | zoom the focused pane to fill the tab, and back |
 | drag a split divider | resize the panes; double click it to even them out |
 | double click a tab | rename it (empty gives the name back to the shell) |
 | drag a tab | move it along the bar |
@@ -1147,6 +1148,8 @@ Everything adjustable lives in one file, `~/.config/shellter/config` — or
 ```text
 # one of the built-in colour schemes
 theme = tokyo-night
+# or one for each macOS appearance, switched as the system switches:
+# theme = light:solarized-light,dark:nord
 
 # where the tab bar sits: top or left
 tab-position = left

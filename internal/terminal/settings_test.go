@@ -66,3 +66,39 @@ func TestApplyChangesRunningPanes(t *testing.T) {
 		}
 	}
 }
+
+// With a theme for each appearance, the palette follows macOS; with one
+// theme, a switch changes nothing.
+func TestAdaptiveTheme(t *testing.T) {
+	light, dark := PaletteFor(mustTheme(t, "solarized-light")), PaletteFor(mustTheme(t, "nord"))
+	g := newTestGUI(5, 20)
+	g.apply(Settings{Palette: light, DarkPalette: dark, Adaptive: true, LineHeight: g.LineHeight})
+
+	g.appearance(true)
+	if g.Palette != dark {
+		t.Fatal("dark mode did not bring the dark theme")
+	}
+	g.appearance(false)
+	if g.Palette != light {
+		t.Fatal("light mode did not bring the light theme back")
+	}
+	g.appearance(true)
+	g.apply(Settings{Palette: light, LineHeight: g.LineHeight}) // one theme now
+	if g.Palette != light {
+		t.Fatal("a single theme was not used in dark mode")
+	}
+	g.appearance(false)
+	g.appearance(true)
+	if g.Palette != light {
+		t.Fatal("a single theme changed with the system")
+	}
+}
+
+func mustTheme(t *testing.T, name string) theme.Theme {
+	t.Helper()
+	th, ok := theme.Get(name)
+	if !ok {
+		t.Fatalf("no %s theme", name)
+	}
+	return th
+}

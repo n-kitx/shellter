@@ -247,6 +247,20 @@ func SetCanSplit(can bool) {
 	C.shellterSetCanSplit(on)
 }
 
+// SetZoom says whether Zoom Pane can be used - the tab has more than one
+// pane - and whether a pane is zoomed now, for the menu's check mark. Safe from
+// any goroutine.
+func SetZoom(can, zoomed bool) {
+	var c, z C.int
+	if can {
+		c = 1
+	}
+	if zoomed {
+		z = 1
+	}
+	C.shellterSetZoom(c, z)
+}
+
 // Confirm asks a yes/no question in a modal alert: message is the question,
 // detail says why it is being asked, and action labels the button that goes
 // ahead (the other is Cancel). It returns true for the action.
@@ -623,6 +637,28 @@ func shellterGoTabMove(from, to C.int) {
 func shellterGoSwapPane(dir C.int) {
 	if cfg := config(); cfg != nil && cfg.OnSwapPane != nil {
 		cfg.OnSwapPane(Direction(dir))
+	}
+}
+
+// SystemDark reports whether macOS is in dark mode. It reads the preference
+// rather than asking the app, so it answers before the window exists.
+func SystemDark() bool { return C.shellterSystemDark() != 0 }
+
+// shellterGoAppearance reports macOS switching between light and dark.
+//
+//export shellterGoAppearance
+func shellterGoAppearance(dark C.int) {
+	if cfg := config(); cfg != nil && cfg.OnAppearance != nil {
+		cfg.OnAppearance(dark != 0)
+	}
+}
+
+// shellterGoZoomPane reports Zoom Pane.
+//
+//export shellterGoZoomPane
+func shellterGoZoomPane() {
+	if cfg := config(); cfg != nil && cfg.OnZoomPane != nil {
+		cfg.OnZoomPane()
 	}
 }
 

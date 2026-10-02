@@ -78,6 +78,8 @@ func run() (int, error) {
 		}
 		return terminal.Settings{
 			Palette:         terminal.PaletteFor(cfg.Theme),
+			DarkPalette:     terminal.PaletteFor(cfg.ThemeDark),
+			Adaptive:        cfg.AdaptiveTheme,
 			FontFamily:      cfg.FontFamily,
 			FontSize:        cfg.FontSize,
 			TabPosition:     position,

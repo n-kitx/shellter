@@ -56,6 +56,8 @@ static BOOL gHoverNew = NO;  // the pointer is over the "+"
 static BOOL gHoverClose = NO; // the pointer is over gHoverTab's close cross
 static NSString *gTitle = @"Shellter";
 static BOOL gCanSplit = YES; // the focused tab has room for another pane
+static BOOL gCanZoom = NO;   // the focused tab has panes to zoom between
+static BOOL gZoomed = NO;    // one of them is zoomed
 static id gDelegate = nil;   // the target of every menu item, context menu included
 
 // Chrome settings, pushed in from the configuration file at startup.
@@ -862,6 +864,20 @@ void shellterAttention(void) {
 void shellterSetCanSplit(int can) {
     dispatch_async(dispatch_get_main_queue(), ^{
       gCanSplit = can != 0;
+    });
+}
+
+int shellterSystemDark(void) {
+    @autoreleasepool {
+        NSString *style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
+        return [style caseInsensitiveCompare:@"Dark"] == NSOrderedSame;
+    }
+}
+
+void shellterSetZoom(int can, int zoomed) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      gCanZoom = can != 0;
+      gZoomed = zoomed != 0;
     });
 }
 
@@ -1906,6 +1922,19 @@ static void dressWindow(NSWindow *window) {
 
 @implementation ShellterDelegate
 
+// The app's appearance follows the system's (only the window is dressed to
+// match its theme), so a change to it is macOS going light or dark.
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary *)change
+                       context:(void *)context {
+    if ([keyPath isEqualToString:@"effectiveAppearance"]) {
+        NSAppearanceName best = [[NSApp effectiveAppearance]
+            bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
+        shellterGoAppearance([best isEqualToString:NSAppearanceNameDarkAqua]);
+    }
+}
+
 // The menu items. AppKit wants a target and a selector, and the delegate is the
 // one object that lives for the whole session, so they live here. Each one does
 // nothing but tell Go what was chosen.
@@ -2056,6 +2085,10 @@ static void dressWindow(NSWindow *window) {
     shellterGoPaneToTab();
 }
 
+- (void)zoomPane:(id)sender {
+    shellterGoZoomPane();
+}
+
 - (void)tabsOnTop:(id)sender {
     shellterGoTabPosition(0);
 }
@@ -2070,6 +2103,10 @@ static void dressWindow(NSWindow *window) {
     SEL action = [item action];
     if (action == @selector(splitBeside:) || action == @selector(splitAbove:)) {
         return gCanSplit;
+    }
+    if (action == @selector(zoomPane:)) {
+        [item setState:gZoomed ? NSControlStateValueOn : NSControlStateValueOff];
+        return gCanZoom;
     }
     return YES;
 }
@@ -2248,6 +2285,9 @@ static void installMenu(id target) {
     item(splitMenu, @"Swap Pane Up", @selector(swapUp:), @"\uF700", swapMods, target);
     item(splitMenu, @"Swap Pane Down", @selector(swapDown:), @"\uF701", swapMods, target);
     item(splitMenu, @"Move Pane to New Tab", @selector(paneToTab:), @"", 0, target);
+    // Cmd+Shift+Return, as in iTerm: one pane fills the tab until pressed again.
+    item(splitMenu, @"Zoom Pane", @selector(zoomPane:), @"\r",
+         NSEventModifierFlagCommand | NSEventModifierFlagShift, target);
     [splitMenu addItem:[NSMenuItem separatorItem]];
     item(splitMenu, @"Close Pane", @selector(closePane:), @"w",
          NSEventModifierFlagCommand, target);
@@ -2448,6 +2488,7 @@ void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
         [view registerForDraggedTypes:@[ NSPasteboardTypeFileURL, NSPasteboardTypeString ]];
         [window setDelegate:delegate];
         [NSApp setDelegate:delegate];
+        [NSApp addObserver:delegate forKeyPath:@"effectiveAppearance" options:0 context:NULL];
         [gFindField setDelegate:delegate];
 
         installMenu(delegate);

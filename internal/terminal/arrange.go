@@ -80,13 +80,14 @@ func (g *GUI) swapPane(d render.Direction) {
 		return
 	}
 	g.mu.Lock()
+	unzoomed := tb.unzoom()
 	next := tb.neighbour(g.grid(), tb.focus, direction(d))
 	if next != nil {
 		tb.swap(tb.focus, next)
 	}
 	g.mu.Unlock()
 
-	if next != nil {
+	if next != nil || unzoomed {
 		g.relayout()
 	}
 }

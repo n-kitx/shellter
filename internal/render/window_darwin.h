@@ -55,6 +55,11 @@ void shellterContextMenu(int canCopy);
 // shellterSetCanSplit enables or disables the split menu items. Safe to call
 // from any thread.
 void shellterSetCanSplit(int can);
+// shellterSetZoom enables Zoom Pane, and checks it while a pane is zoomed.
+// Safe to call from any thread.
+void shellterSetZoom(int can, int zoomed);
+// shellterSystemDark reports whether macOS is in dark mode. Any thread.
+int shellterSystemDark(void);
 
 // shellterConfirm shows a modal alert with the action and Cancel, and returns 1
 // if the action was chosen. Main thread only.

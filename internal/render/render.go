@@ -88,6 +88,10 @@ type Config struct {
 	// OnPaneToTab moves the focused pane out into a tab of its own.
 	OnSwapPane  func(Direction)
 	OnPaneToTab func()
+	// OnZoomPane enlarges the focused pane to fill its tab, or puts it back.
+	OnZoomPane func()
+	// OnAppearance reports macOS switching between light and dark mode.
+	OnAppearance func(dark bool)
 
 	// --- the clipboard ---
 

@@ -66,6 +66,13 @@ type GUI struct {
 	SessionPath    string
 	// PasteWarning asks before a multi-line paste that would run its lines.
 	PasteWarning bool
+	// DarkPalette replaces Palette while macOS is in dark mode, when Adaptive.
+	// lightPalette is the other one, and dark whether the system is dark now;
+	// Palette is always whichever of the two applies (pickPalette). UI thread.
+	DarkPalette  Palette
+	Adaptive     bool
+	lightPalette Palette
+	dark         bool
 	// Reload reads the settings again, file and flags, for when the file
 	// changes; ThemesDir is where theme files live, so that editing one
 	// counts as a change too. Without Reload, settings are read once.
@@ -156,6 +163,7 @@ func NewGUI() *GUI {
 		Title:           "Shellter",
 		FontSize:        14,
 		Palette:         DefaultPalette(),
+		lightPalette:    DefaultPalette(),
 		LineHeight:      1,
 		ScrollbackLines: screen.DefaultScrollback,
 		TabPosition:     render.TabsTop,
@@ -225,6 +233,8 @@ func (g *GUI) Run() (int, error) {
 		OnTabMove:     g.moveTab,
 		OnSwapPane:    g.swapPane,
 		OnPaneToTab:   g.paneToTab,
+		OnZoomPane:    g.zoomPane,
+		OnAppearance:  g.appearance,
 		OnSettings:    g.openSettings,
 		CanQuit:       g.canQuit,
 	})
@@ -374,16 +384,40 @@ func (g *GUI) focusPane(d render.Direction) {
 		return
 	}
 	g.mu.Lock()
+	// Moving to another pane ends a zoom: the one you are moving to is hidden.
+	unzoomed := tb.unzoom()
 	next := tb.neighbour(g.grid(), tb.focus, direction(d))
 	if next != nil {
 		tb.focus = next
 	}
 	g.mu.Unlock()
 
-	if next != nil {
+	switch {
+	case unzoomed:
+		g.relayout()
+	case next != nil:
 		g.syncTabs()
 		render.Redraw()
 	}
+}
+
+// zoomPane enlarges the focused pane to fill its tab, or puts it back.
+func (g *GUI) zoomPane() {
+	tb := g.currentTab()
+	if tb == nil {
+		return
+	}
+	g.mu.Lock()
+	alone := tb.sole() != nil
+	if !tb.unzoom() && !alone {
+		tb.zoomed = tb.focus
+	}
+	g.mu.Unlock()
+	if alone {
+		render.Beep() // nothing to zoom out of
+		return
+	}
+	g.relayout()
 }
 
 // closePane ends the focused pane's shell. Its pump then stops and forgetPane
@@ -605,9 +639,15 @@ func (g *GUI) syncTabs() {
 	g.mu.Lock()
 	tabs, active := g.tabViews(), g.active
 	canSplit := active < len(g.tabs) && !g.tabs[active].full()
+	canZoom, zoomed := false, false
+	if active < len(g.tabs) {
+		canZoom = g.tabs[active].sole() == nil
+		zoomed = g.tabs[active].zoomed != nil
+	}
 	g.mu.Unlock()
 	render.SetTabs(tabs, active, g.TabPosition)
 	render.SetCanSplit(canSplit)
+	render.SetZoom(canZoom, zoomed)
 }
 
 // ---------------------------------------------------------------------------

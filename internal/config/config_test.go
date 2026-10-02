@@ -183,6 +183,19 @@ func TestAnUnknownThemeNamesTheRealOnes(t *testing.T) {
 }
 
 func TestThemeNamesAreForgiving(t *testing.T) {
+	adaptive := parse(t, "theme = dark:nord, light:solarized-light")
+	if !adaptive.AdaptiveTheme || adaptive.Theme.Name != "solarized-light" || adaptive.ThemeDark.Name != "nord" {
+		t.Errorf("an adaptive theme came out as %+v", adaptive)
+	}
+	if plain := parse(t, "theme = dark:nord,light:solarized-light\ntheme = nord"); plain.AdaptiveTheme {
+		t.Error("a plain theme after an adaptive one stayed adaptive")
+	}
+	for _, bad := range []string{"theme = dark:nord", "theme = light:nord,dusk:dracula", "theme = light:nope,dark:nord"} {
+		if _, err := Parse(strings.NewReader(bad)); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+
 	cfg := parse(t, "theme = Tokyo Night")
 	if cfg.Theme.Name != "tokyo-night" {
 		t.Errorf("got %q, want tokyo-night", cfg.Theme.Name)

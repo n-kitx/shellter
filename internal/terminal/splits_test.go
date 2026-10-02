@@ -340,3 +340,60 @@ func TestOnePaneIsStillJustAGrid(t *testing.T) {
 		t.Errorf("got %q, want the text drawn", got)
 	}
 }
+
+// Zoom fills the tab with the focused pane and brings the others back as
+// they were; moving the focus, splitting or closing the zoomed pane ends it.
+func TestZoomPane(t *testing.T) {
+	g := newTestGUI(24, 81)
+	tb := g.currentTab()
+	left := tb.focus
+	g.zoomPane() // one pane: nothing to zoom
+	if tb.zoomed != nil {
+		t.Fatal("a lone pane zoomed")
+	}
+
+	right := g.addPane(tb, 24, 40, splitBeside)
+	before := rects(g, tb)
+	g.zoomPane()
+	if tb.zoomed != right {
+		t.Fatal("the focused pane did not zoom")
+	}
+	got, lines := tb.layout(g.grid(), nil, nil)
+	if len(got) != 1 || got[0].pane != right || got[0].rect != (rect{0, 0, 24, 81}) || len(lines) != 0 {
+		t.Fatalf("zoomed layout: %+v, %d dividers", got, len(lines))
+	}
+	if r, c := right.scr.Size(); r != 24 || c != 81 {
+		t.Errorf("the zoomed pane is %dx%d, want the whole tab", r, c)
+	}
+
+	g.zoomPane()
+	if tb.zoomed != nil || !equalRects(rects(g, tb), before) {
+		t.Fatalf("unzoomed back to %+v, want %+v", rects(g, tb), before)
+	}
+
+	g.zoomPane()
+	g.focusPane(render.DirLeft)
+	if tb.zoomed != nil || tb.focus != left {
+		t.Fatal("moving the focus did not end the zoom and arrive")
+	}
+
+	g.zoomPane()
+	g.mu.Lock()
+	tb.remove(left)
+	g.mu.Unlock()
+	if tb.zoomed != nil {
+		t.Fatal("closing the zoomed pane left the tab zoomed")
+	}
+}
+
+func equalRects(a, b []rect) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

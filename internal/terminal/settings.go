@@ -14,7 +14,11 @@ import (
 // form the GUI uses it. main builds one from the file and the flags; the GUI
 // takes it once at startup and again whenever the file changes.
 type Settings struct {
-	Palette         Palette
+	Palette Palette
+	// DarkPalette is used instead of Palette while macOS is in dark mode, when
+	// Adaptive says the theme setting named one for each.
+	DarkPalette     Palette
+	Adaptive        bool
 	FontFamily      string
 	FontSize        float64
 	Chrome          render.Chrome
@@ -69,7 +73,9 @@ func ParseBell(s string) Bell {
 
 // Use takes settings before the window opens.
 func (g *GUI) Use(s Settings) {
-	g.Palette = s.Palette
+	g.lightPalette, g.DarkPalette, g.Adaptive = s.Palette, s.DarkPalette, s.Adaptive
+	g.dark = render.SystemDark()
+	g.Palette = g.pickPalette()
 	g.FontFamily = s.FontFamily
 	g.FontSize = s.FontSize
 	g.Chrome = s.Chrome
@@ -90,7 +96,8 @@ func (g *GUI) apply(s Settings) {
 	if s.Chrome.Opacity <= 0 || s.Chrome.Opacity > 1 {
 		s.Chrome.Opacity = 1
 	}
-	g.Palette = s.Palette
+	g.lightPalette, g.DarkPalette, g.Adaptive = s.Palette, s.DarkPalette, s.Adaptive
+	g.Palette = g.pickPalette()
 	g.Chrome = s.Chrome
 	g.CopyOnSelect = s.CopyOnSelect
 	g.Bell = s.Bell
@@ -185,4 +192,27 @@ func (g *GUI) settingsStamp() string {
 		}
 	}
 	return stamp
+}
+
+// pickPalette is the palette for the system's appearance now: the dark one
+// while macOS is dark, if the theme setting named one, and otherwise the one
+// theme there is.
+func (g *GUI) pickPalette() Palette {
+	if g.Adaptive && g.dark {
+		return g.DarkPalette
+	}
+	return g.lightPalette
+}
+
+// appearance is macOS switching between light and dark - by hand, or at
+// sunset. Main thread only, like apply.
+func (g *GUI) appearance(dark bool) {
+	g.dark = dark
+	if !g.Adaptive {
+		return
+	}
+	g.Palette = g.pickPalette()
+	render.SetChrome(g.chrome())
+	g.syncTabs()
+	render.Redraw()
 }

@@ -31,6 +31,11 @@ type Config struct {
 	// rather than a string because package theme depends on nothing, so
 	// checking the name here costs no coupling and saves main a second lookup.
 	Theme theme.Theme
+	// ThemeDark is the theme for when macOS is in dark mode, set by
+	// "theme = light:NAME,dark:NAME"; AdaptiveTheme says it was, and Theme is
+	// then the light one. A plain "theme = NAME" is one theme always.
+	ThemeDark     theme.Theme
+	AdaptiveTheme bool
 	// TabPosition is "top" or "left". Kept as a string because package config
 	// must not depend on the renderer; main turns it into a render.TabPosition
 	// and reports a bad value the same way it reports a bad flag.
@@ -163,7 +168,7 @@ func Create(path string) error {
 	_, err = fmt.Fprintf(f, `# Shellter settings: "key = value", one per line. Remove the "#" to use one.
 # Changes apply as soon as the file is saved.
 
-# theme = %s    # %s, or a file in themes/
+# theme = %s    # %s, or a file in themes/; "light:NAME,dark:NAME" follows macOS
 # font-family = %s
 # font-size = %g
 # option-as-meta = %t    # Option types Meta (Alt) for the shell, not accents
@@ -237,11 +242,14 @@ func parseIn(r io.Reader, themesDir string) (Config, error) {
 func (c *Config) Set(key, value string) error {
 	switch key {
 	case "theme":
+		if strings.Contains(value, ":") {
+			return c.setAdaptiveTheme(value)
+		}
 		t, err := c.findTheme(value)
 		if err != nil {
 			return err
 		}
-		c.Theme = t
+		c.Theme, c.ThemeDark, c.AdaptiveTheme = t, theme.Theme{}, false
 	case "font-family":
 		if value == "" {
 			return errors.New("font-family needs a font name, such as Menlo")
@@ -335,6 +343,36 @@ func (c *Config) Set(key, value string) error {
 	default:
 		return fmt.Errorf("unknown setting %q", key)
 	}
+	return nil
+}
+
+// setAdaptiveTheme reads "light:NAME,dark:NAME", in either order: a theme for
+// each of macOS's appearances, switched between as the system switches.
+func (c *Config) setAdaptiveTheme(value string) error {
+	var light, dark string
+	for _, part := range strings.Split(value, ",") {
+		mode, name, _ := strings.Cut(strings.TrimSpace(part), ":")
+		switch strings.TrimSpace(mode) {
+		case "light":
+			light = strings.TrimSpace(name)
+		case "dark":
+			dark = strings.TrimSpace(name)
+		default:
+			return fmt.Errorf("theme %q: each part is light:NAME or dark:NAME", value)
+		}
+	}
+	if light == "" || dark == "" {
+		return fmt.Errorf("theme %q needs both a light:NAME and a dark:NAME", value)
+	}
+	l, err := c.findTheme(light)
+	if err != nil {
+		return err
+	}
+	d, err := c.findTheme(dark)
+	if err != nil {
+		return err
+	}
+	c.Theme, c.ThemeDark, c.AdaptiveTheme = l, d, true
 	return nil
 }
 
