@@ -12,6 +12,9 @@ import (
 // gone.
 func TestClosedPanesLeaveNothingBehind(t *testing.T) {
 	g := newLiveGUI(t)
+	// A shell may still be printing when its tab is closed; closing it anyway
+	// is the answer, not a dialog nobody is there to click.
+	g.confirm = func(string, string, string) bool { return true }
 	if _, err := g.openTab(); err != nil { // the one that stays
 		t.Fatal(err)
 	}

@@ -36,7 +36,13 @@ type Theme struct {
 	// reads as "slightly dirty background" on another, and selection is the
 	// one highlight that has to be unmistakable.
 	Selection uint32
-	ANSI      [16]uint32
+	// SelectionText, when HasSelectionText is set, is the colour of marked
+	// text, whatever colour it was. A theme whose selection is light behind
+	// light text (Moonfly's) needs it to stay readable; the rest leave text
+	// its own colour.
+	SelectionText    uint32
+	HasSelectionText bool
+	ANSI             [16]uint32
 }
 
 // Default is the theme used when the settings file says nothing.
@@ -134,6 +140,21 @@ var all = []Theme{
 		},
 	},
 	{
+		// Moonfly, by Dennis B (bluz71/vim-moonfly-colors), as Ghostty ships it.
+		Name:             "moonfly",
+		Selection:        0xb2ceee,
+		SelectionText:    0x080808,
+		HasSelectionText: true,
+		Foreground:       0xbdbdbd,
+		Background:       0x080808,
+		ANSI: [16]uint32{
+			0x323437, 0xff5454, 0x8cc85f, 0xe3c78a,
+			0x80a0ff, 0xcf87e8, 0x79dac8, 0xc6c6c6,
+			0x949494, 0xff5189, 0x36c692, 0xc6c684,
+			0x74b2ff, 0xae81ff, 0x85dc85, 0xe4e4e4,
+		},
+	},
+	{
 		Name:       "nord",
 		Selection:  0x434c5e,
 		Foreground: 0xd8dee9,
@@ -167,6 +188,21 @@ var all = []Theme{
 			0x268bd2, 0xd33682, 0x2aa198, 0xeee8d5,
 			0x586e75, 0xcb4b16, 0x93a1a1, 0x839496,
 			0x657b83, 0x6c71c4, 0x93a1a1, 0xfdf6e3,
+		},
+	},
+	{
+		// Srcery (srcery-colors), as Ghostty ships it.
+		Name:             "srcery",
+		Selection:        0xfce8c3,
+		SelectionText:    0x1c1b19,
+		HasSelectionText: true,
+		Foreground:       0xfce8c3,
+		Background:       0x1c1b19,
+		ANSI: [16]uint32{
+			0x1c1b19, 0xef2f27, 0x519f50, 0xfbb829,
+			0x2c78bf, 0xe02c6d, 0x0aaeb3, 0xbaa67f,
+			0x918175, 0xf75341, 0x98bc37, 0xfed06e,
+			0x68a8e4, 0xff5c8f, 0x2be4d0, 0xfce8c3,
 		},
 	},
 	{
@@ -223,6 +259,8 @@ func Parse(name string, r io.Reader) (Theme, error) {
 			t.Foreground = rgb
 		case key == "selection":
 			t.Selection = rgb
+		case key == "selection-text":
+			t.SelectionText, t.HasSelectionText = rgb, true
 		case strings.HasPrefix(key, "color"):
 			i, err := strconv.Atoi(strings.TrimPrefix(key, "color"))
 			if err != nil || i < 0 || i > 15 {

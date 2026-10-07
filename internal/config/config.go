@@ -166,31 +166,75 @@ func Create(path string) error {
 	}
 	d := Default()
 	_, err = fmt.Fprintf(f, `# Shellter settings: "key = value", one per line. Remove the "#" to use one.
-# Changes apply as soon as the file is saved.
+# Anything left out keeps the default shown. Changes apply as soon as the file
+# is saved, and every key is also a flag: shellter -gui -theme nord
 
-# theme = %s    # %s, or a file in themes/; "light:NAME,dark:NAME" follows macOS
+# Colours. Built in:
+%s
+# Or a file in themes/ beside this one, or one theme per macOS appearance:
+#   theme = light:github-light,dark:moonfly
+# theme = %s
+
+# The font, by the name Font Book shows; size in points, 4 to 72.
 # font-family = %s
 # font-size = %g
-# option-as-meta = %t    # Option types Meta (Alt) for the shell, not accents
-# copy-on-select = %t
-# cursor-style = %s    # block, underline or bar
+# Rows as a multiple of the font's own spacing, 0.8 to 3.
+# line-height = %g
+
+# The cursor - block, underline or bar - until a program asks for its own.
+# cursor-style = %s
 # cursor-blink = %t
-# line-height = %g    # 1 is the font's own spacing; 1.2 is a fifth taller
-# restore-session = %t    # reopen the tabs and text you quit with
-# paste-warning = %t    # ask before a paste of several lines would run them
-# bell = %s    # sound, flash, both or off
-# tab-position = %s    # top or left
-# background-opacity = %g    # 0 to 1
+
+# Option types Meta (Alt) for the shell - Option+B is back-a-word - not accents.
+# option-as-meta = %t
+# Copy a selection the moment the mouse lets go, without Cmd+C.
+# copy-on-select = %t
+# Ask before a paste of several lines would run each one as it arrived.
+# paste-warning = %t
+
+# What a program ringing the bell does: sound, flash, both or off.
+# bell = %s
+
+# Reopen the tabs, splits and text you quit with.
+# restore-session = %t
+
+# The window: tab bar at the top or left; opacity 0 to 1, with the desktop
+# frosted behind it when blurred; padding in points, 0 to 200.
+# tab-position = %s
+# background-opacity = %g
 # background-blur = %t
 # window-padding = %d
+
+# Lines of history each pane keeps; 0 keeps none.
 # scrollback = %d
-`, d.Theme.Name, strings.Join(theme.Names(), ", "), d.FontFamily, d.FontSize, d.OptionAsMeta, d.CopyOnSelect,
-		d.CursorStyle, d.CursorBlink, d.LineHeight, d.RestoreSession, d.PasteWarning, d.Bell, d.TabPosition,
-		d.BackgroundOpacity, d.BackgroundBlur, d.WindowPadding, d.Scrollback)
+`, commentList(theme.Names()), d.Theme.Name, d.FontFamily, d.FontSize, d.LineHeight,
+		d.CursorStyle, d.CursorBlink, d.OptionAsMeta, d.CopyOnSelect, d.PasteWarning, d.Bell,
+		d.RestoreSession, d.TabPosition, d.BackgroundOpacity, d.BackgroundBlur, d.WindowPadding,
+		d.Scrollback)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	return err
+}
+
+// commentList lays names out as indented comment lines, as many to a line as
+// fit in 80 columns, so the template's list of themes reads as a list.
+func commentList(names []string) string {
+	var b strings.Builder
+	line := "#  "
+	for i, name := range names {
+		item := " " + name
+		if i < len(names)-1 {
+			item += ","
+		}
+		if len(line)+len(item) > 78 {
+			b.WriteString(line + "\n")
+			line = "#  "
+		}
+		line += item
+	}
+	b.WriteString(line)
+	return b.String()
 }
 
 // Parse layers a settings file over Default.

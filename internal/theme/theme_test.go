@@ -92,7 +92,11 @@ func TestEveryThemeHasAVisibleSelection(t *testing.T) {
 		if th.Selection == th.Background {
 			t.Errorf("%s: selected text would look exactly like unselected text", th.Name)
 		}
-		if th.Selection == th.Foreground {
+		textOnSelection := th.Foreground
+		if th.HasSelectionText {
+			textOnSelection = th.SelectionText // Srcery's highlight is its text colour, on purpose
+		}
+		if th.Selection == textOnSelection {
 			t.Errorf("%s: selected text would be invisible against its own highlight", th.Name)
 		}
 	}
@@ -119,5 +123,37 @@ color1 = 0xf38ba8
 	_, err = Parse("bad", strings.NewReader("background = blue\ncolor16 = #000000\nshade = #000000\n"))
 	if err == nil || strings.Count(err.Error(), "line") != 3 {
 		t.Fatalf("want all three bad lines reported, got %v", err)
+	}
+}
+
+// The themes taken from Ghostty match it, selection text included.
+func TestGhosttyThemes(t *testing.T) {
+	for _, c := range []struct {
+		name               string
+		fg, bg, sel, selFG uint32
+		red, brightWhite   uint32
+	}{
+		{"moonfly", 0xbdbdbd, 0x080808, 0xb2ceee, 0x080808, 0xff5454, 0xe4e4e4},
+		{"srcery", 0xfce8c3, 0x1c1b19, 0xfce8c3, 0x1c1b19, 0xef2f27, 0xfce8c3},
+	} {
+		th, ok := Get(c.name)
+		if !ok {
+			t.Fatalf("no %s theme", c.name)
+		}
+		if th.Foreground != c.fg || th.Background != c.bg || th.Selection != c.sel ||
+			!th.HasSelectionText || th.SelectionText != c.selFG ||
+			th.ANSI[1] != c.red || th.ANSI[15] != c.brightWhite {
+			t.Errorf("%s: %+v", c.name, th)
+		}
+	}
+	if th, _ := Get("Moonfly"); th.Name != "moonfly" {
+		t.Error("Moonfly with a capital was not found")
+	}
+}
+
+func TestThemeFileSelectionText(t *testing.T) {
+	th, err := Parse("mine", strings.NewReader("selection = #ffffff\nselection-text = #000000\n"))
+	if err != nil || !th.HasSelectionText || th.SelectionText != 0 {
+		t.Fatalf("selection-text: %+v, %v", th, err)
 	}
 }

@@ -1148,10 +1148,12 @@ Everything adjustable lives in one file, `~/.config/shellter/config` — or
 `$XDG_CONFIG_HOME/shellter/config` if that is set:
 
 ```text
-# one of the built-in colour schemes
+# one of the built-in colour schemes: shellter, dracula, github-light,
+# gruvbox-dark, moonfly, nord, solarized-dark, solarized-light, srcery,
+# tokyo-night - or a file in themes/
 theme = tokyo-night
 # or one for each macOS appearance, switched as the system switches:
-# theme = light:solarized-light,dark:nord
+# theme = light:github-light,dark:moonfly
 
 # where the tab bar sits: top or left
 tab-position = left
@@ -1248,12 +1250,12 @@ flags that were actually typed, so an untouched flag never overwrites the file.
 
 ### Themes
 
-`theme = nord` picks one of eight built-in colour schemes:
+`theme = nord` picks one of ten built-in colour schemes:
 
 | | |
 |---|---|
 | `shellter` | the default: grey on a dark charcoal |
-| `dracula`, `gruvbox-dark`, `nord`, `solarized-dark`, `tokyo-night` | the published dark palettes, copied exactly |
+| `dracula`, `gruvbox-dark`, `moonfly`, `nord`, `solarized-dark`, `srcery`, `tokyo-night` | the published dark palettes, copied exactly (Moonfly and Srcery as Ghostty ships them) |
 | `github-light`, `solarized-light` | light, to prove the window works either way |
 
 They live in `internal/theme`, which is on purpose the most boring package in
@@ -1277,6 +1279,7 @@ after the theme. `theme = mocha` looks for a built-in `mocha`, and then for
 background = #1e1e2e
 foreground = #cdd6f4
 selection  = #45475a
+selection-text = #cdd6f4   # optional: one colour for all selected text
 color0  = #45475a     # color0 to color15: the sixteen ANSI colours
 color1  = #f38ba8
 ```
@@ -1523,7 +1526,7 @@ In a window:
 
 ```sh
 go run ./cmd/shellter -gui                         # tabs in the title bar
-go run ./cmd/shellter -gui -theme nord             # one of eight colour schemes
+go run ./cmd/shellter -gui -theme nord             # one of ten colour schemes
 go run ./cmd/shellter -gui -tab-position left      # tabs down the side
 go run ./cmd/shellter -gui -background-opacity 0.9 # let the desktop through
 ```

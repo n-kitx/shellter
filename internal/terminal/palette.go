@@ -16,8 +16,11 @@ import (
 type Palette struct {
 	Foreground uint32
 	Background uint32
-	// Selection is the background behind text the user has marked.
-	Selection uint32
+	// Selection is the background behind text the user has marked, and
+	// SelectionText the colour of that text when the theme fixes one.
+	Selection        uint32
+	SelectionText    uint32
+	HasSelectionText bool
 	// ANSI holds the sixteen named colours: 0-7 normal, 8-15 bright.
 	ANSI [16]uint32
 }
@@ -32,10 +35,12 @@ func DefaultPalette() Palette { return PaletteFor(theme.Default()) }
 // than a question asked of every cell.
 func PaletteFor(t theme.Theme) Palette {
 	return Palette{
-		Foreground: t.Foreground,
-		Background: t.Background,
-		Selection:  t.Selection,
-		ANSI:       t.ANSI,
+		Foreground:       t.Foreground,
+		Background:       t.Background,
+		Selection:        t.Selection,
+		SelectionText:    t.SelectionText,
+		HasSelectionText: t.HasSelectionText,
+		ANSI:             t.ANSI,
 	}
 }
 
@@ -119,7 +124,10 @@ func (p Palette) FrameInto(snap screen.Snapshot, buf []render.Cell, sel []span) 
 		// painting with the colours swapped.
 		if selected(sel, i/snap.Cols, i%snap.Cols) {
 			bg = p.Selection
-			if fg == bg {
+			switch {
+			case p.HasSelectionText:
+				fg = p.SelectionText
+			case fg == bg:
 				fg = p.Background // never leave the text invisible
 			}
 		}
