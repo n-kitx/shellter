@@ -31,6 +31,10 @@ const (
 	// the string terminator, parameters and all, e.g. "+q544e" asking what
 	// the terminal's name is. Field: Data.
 	EventDCS
+	// EventText is a run of printable ASCII (0x20-0x7E), one event for the
+	// lot instead of one EventPrint per byte. Only a parser with TextRuns set
+	// emits it. Field: Text.
+	EventText
 )
 
 func (k Kind) String() string {
@@ -47,6 +51,8 @@ func (k Kind) String() string {
 		return "OSC"
 	case EventDCS:
 		return "DCS"
+	case EventText:
+		return "TEXT"
 	default:
 		return fmt.Sprintf("Kind(%d)", int(k))
 	}
@@ -93,6 +99,10 @@ type Event struct {
 
 	// Data is the OSC or DCS payload, e.g. "0;my window title".
 	Data string
+
+	// Text is an EventText's bytes. Borrowed like Params: it points into the
+	// data given to Parse.
+	Text []byte
 }
 
 // Clone returns a copy that owns its slices, for a caller that keeps an event
@@ -103,6 +113,9 @@ func (e Event) Clone() Event {
 	}
 	if len(e.Intermediates) > 0 {
 		e.Intermediates = append([]byte(nil), e.Intermediates...)
+	}
+	if len(e.Text) > 0 {
+		e.Text = append([]byte(nil), e.Text...)
 	}
 	return e
 }
@@ -122,6 +135,8 @@ func (e Event) String() string {
 	switch e.Kind {
 	case EventPrint:
 		return fmt.Sprintf("PRINT   %q", e.Rune)
+	case EventText:
+		return fmt.Sprintf("TEXT    %q", e.Text)
 	case EventControl:
 		return fmt.Sprintf("CONTROL %-3s (0x%02x)", controlName(byte(e.Rune)), e.Rune)
 	case EventCSI:

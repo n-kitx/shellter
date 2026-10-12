@@ -275,6 +275,7 @@ func (p *pane) restoreText(text string, saved time.Time) {
 	p.restoredNote = "Restored session: " + saved.Format("Mon 2 Jan 15:04")
 	note := "\r\n\x1b[0;2m" + p.restoredNote + "\x1b[0m\r\n"
 	ps := parser.New()
+	ps.TextRuns = true
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	ps.Parse([]byte(text), p.scr.Apply)

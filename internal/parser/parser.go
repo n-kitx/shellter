@@ -103,6 +103,13 @@ type Parser struct {
 
 	// Partial UTF-8 sequence carried across Parse calls.
 	utf8 []byte
+
+	// TextRuns makes the parser hand over each run of printable ASCII as one
+	// EventText rather than an EventPrint per byte. Most of what a terminal
+	// is shown is exactly that, and one event and one write per run instead
+	// of per character is most of what applying output to a screen costs.
+	// Off by default, so a trace still reads one character at a time.
+	TextRuns bool
 }
 
 // New returns a parser in the Ground state.
@@ -135,9 +142,21 @@ func (p *Parser) Reset() {
 // Parser. A read() from a PTY returns whatever happened to be in the kernel
 // buffer at that instant, so "ESC [ 31 m" really can arrive as three reads.
 func (p *Parser) Parse(data []byte, emit func(Event)) {
-	for _, b := range data {
+	for i := 0; i < len(data); i++ {
+		b := data[i]
 		switch p.state {
 		case StateGround:
+			// A half-read UTF-8 character has to be dropped first, which is
+			// ground's business; that is rare enough to leave to it.
+			if p.TextRuns && printable(b) && len(p.utf8) == 0 {
+				j := i + 1
+				for j < len(data) && printable(data[j]) {
+					j++
+				}
+				emit(Event{Kind: EventText, Text: data[i:j]})
+				i = j - 1
+				continue
+			}
 			p.ground(b, emit)
 		case StateEscape:
 			p.escape(b, emit)
@@ -159,6 +178,9 @@ func (p *Parser) ParseAll(data []byte) []Event {
 	p.Parse(data, func(e Event) { events = append(events, e.Clone()) })
 	return events
 }
+
+// printable is printable ASCII: what an EventText is made of.
+func printable(b byte) bool { return b >= 0x20 && b < del }
 
 // ---------------------------------------------------------------------------
 // States

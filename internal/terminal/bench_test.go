@@ -46,6 +46,7 @@ func BenchmarkPumpChunk(b *testing.B) {
 		// the GUI which pane is focused locks the GUI itself.
 		pane := g.current()
 		ps := parser.New()
+		ps.TextRuns = true
 		pane.mu.Lock()
 		ps.Parse(data, pane.scr.Apply)
 		_ = pane.scr.TakeReplies()

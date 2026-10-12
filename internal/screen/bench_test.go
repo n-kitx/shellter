@@ -53,7 +53,7 @@ func benchApply(b *testing.B, data []byte) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		s := New(24, 80)
-		p := parser.New()
+		p := newParser()
 		p.Parse(data, s.Apply)
 	}
 }
@@ -66,7 +66,7 @@ func BenchmarkApplyPlain(b *testing.B) { benchApply(b, plainOutput()) }
 func BenchmarkApplyPlainWarm(b *testing.B) {
 	data := plainOutput()
 	s := NewWithScrollback(24, 80, 200)
-	p := parser.New()
+	p := newParser()
 	p.Parse(data, s.Apply) // fill the ring
 
 	b.SetBytes(int64(len(data)))
@@ -77,12 +77,28 @@ func BenchmarkApplyPlainWarm(b *testing.B) {
 	}
 }
 func BenchmarkApplyColoured(b *testing.B) { benchApply(b, colouredOutput()) }
-func BenchmarkApplyRedraw(b *testing.B)   { benchApply(b, fullScreenRedraw()) }
+
+// Coloured output on a terminal that has been open a while, like
+// BenchmarkApplyPlainWarm.
+func BenchmarkApplyColouredWarm(b *testing.B) {
+	data := colouredOutput()
+	s := NewWithScrollback(24, 80, 200)
+	p := newParser()
+	p.Parse(data, s.Apply)
+
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p.Parse(data, s.Apply)
+	}
+}
+func BenchmarkApplyRedraw(b *testing.B) { benchApply(b, fullScreenRedraw()) }
 
 // Snapshot runs once per frame - up to 60 times a second while output flows.
 func BenchmarkSnapshot(b *testing.B) {
 	s := New(24, 80)
-	p := parser.New()
+	p := newParser()
 	p.Parse(colouredOutput(), s.Apply)
 
 	b.ReportAllocs()
@@ -95,7 +111,7 @@ func BenchmarkSnapshot(b *testing.B) {
 // Scrolled back, the snapshot has to compose history with the live grid.
 func BenchmarkSnapshotScrolledBack(b *testing.B) {
 	s := New(24, 80)
-	p := parser.New()
+	p := newParser()
 	p.Parse(plainOutput(), s.Apply)
 	s.ScrollBy(12)
 
@@ -109,7 +125,7 @@ func BenchmarkSnapshotScrolledBack(b *testing.B) {
 // One line scrolling off the top: the most frequent single operation there is.
 func BenchmarkScrollUp(b *testing.B) {
 	s := New(24, 80)
-	p := parser.New()
+	p := newParser()
 	p.Parse(plainOutput(), s.Apply)
 
 	b.ReportAllocs()
@@ -122,7 +138,7 @@ func BenchmarkScrollUp(b *testing.B) {
 // Dragging a window edge produces a resize per frame.
 func BenchmarkResize(b *testing.B) {
 	s := New(24, 80)
-	p := parser.New()
+	p := newParser()
 	p.Parse(plainOutput(), s.Apply)
 
 	b.ReportAllocs()
@@ -153,4 +169,11 @@ func BenchmarkResizeFullHistory(b *testing.B) {
 			s.Resize(40, 120)
 		}
 	}
+}
+
+// newParser is a parser set up the way a pane's is: text in runs.
+func newParser() *parser.Parser {
+	p := parser.New()
+	p.TextRuns = true
+	return p
 }

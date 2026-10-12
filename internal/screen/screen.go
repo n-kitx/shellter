@@ -507,6 +507,8 @@ func (s *Screen) Apply(e parser.Event) {
 	switch e.Kind {
 	case parser.EventPrint:
 		s.print(e.Rune)
+	case parser.EventText:
+		s.printASCII(e.Text)
 	case parser.EventControl:
 		s.control(byte(e.Rune))
 	case parser.EventCSI:
@@ -621,6 +623,66 @@ func (s *Screen) print(r rune) {
 		}
 	} else {
 		s.cur.Col += w
+	}
+}
+
+// printASCII prints a run of printable ASCII: exactly what printing it one
+// character at a time would do, a row at a time. Every character is one
+// column wide and none combines, so a run is a copy into the row with the
+// edges of any wide characters it overwrites cleaned up, then the cursor
+// moved once. A translated set (line drawing) or insert mode takes the long
+// way.
+func (s *Screen) printASCII(b []byte) {
+	if len(b) == 0 {
+		return
+	}
+	if s.charsets.active() != charsetASCII || s.mode.Insert {
+		for _, c := range b {
+			s.print(rune(c))
+		}
+		return
+	}
+	pen := s.pen
+	for len(b) > 0 {
+		if s.pendingWrap {
+			s.setWrapped(s.cur.Row, true)
+			s.cur.Col = 0
+			s.lineFeed()
+			s.pendingWrap = false
+		}
+		line := s.row(s.cur.Row)
+		col := s.cur.Col
+		n := min(len(b), s.cols-col)
+		// Only the ends of the run can cut a wide character in half; what
+		// is in between is overwritten anyway.
+		splitWide(line, col)
+		splitWide(line, col+n-1)
+		dst := line[col : col+n]
+		for i, c := range b[:n] {
+			dst[i] = Cell{Rune: rune(c), Attr: pen}
+		}
+		s.lastPrint = rune(b[n-1])
+		b = b[n:]
+
+		if col+n < s.cols {
+			s.cur.Col = col + n
+			continue
+		}
+		// The run reached the last column.
+		s.cur.Col = s.cols - 1
+		if s.mode.AutoWrap {
+			s.pendingWrap = true
+			continue
+		}
+		// Without autowrap every further character lands on the last column,
+		// so only the final one is left there.
+		if len(b) > 0 {
+			last := b[len(b)-1]
+			splitWide(line, s.cols-1)
+			line[s.cols-1] = Cell{Rune: rune(last), Attr: pen}
+			s.lastPrint = rune(last)
+		}
+		return
 	}
 }
 

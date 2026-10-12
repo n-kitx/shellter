@@ -96,6 +96,10 @@ type pane struct {
 	touched      atomic.Bool
 }
 
+// parseSlice is the most output parsed under one hold of a pane's lock: about
+// half a millisecond's work, so a frame being drawn waits no longer.
+const parseSlice = 64 << 10
+
 // bellInterval is the least time between two bells from one pane. A program
 // printing BEL in a loop would otherwise play the alert sound hundreds of
 // times a second.
@@ -116,19 +120,29 @@ func newPane(cfg shell.Config, rows, cols, scrollback int) (*pane, error) {
 // business rather than the window's: onChunk says a chunk arrived, so that the
 // GUI can redraw if this pane is on screen and light the activity dot on its
 // tab if it is not.
+//
+// The reading itself happens on a goroutine of its own (readAhead), so that
+// the next read is under way while this one is parsed.
 func (p *pane) pump(r io.Reader, onChunk func()) {
 	ps := parser.New()
-	buf := make([]byte, readBufferSize)
+	ps.TextRuns = true
+	ra := startReadAhead(r)
+	var data []byte
 	var lastBell time.Time
 	for {
-		n, err := r.Read(buf)
-		if n > 0 {
+		var err error
+		data, err = ra.next(data)
+		for rest := data; len(rest) > 0; {
+			// A flood arrives in large pieces; the screen is locked for a
+			// slice of one at a time, so a frame is never kept waiting long.
+			n := min(len(rest), parseSlice)
 			p.mu.Lock()
-			ps.Parse(buf[:n], p.scr.Apply)
+			ps.Parse(rest[:n], p.scr.Apply)
 			replies := p.scr.TakeReplies()
 			clips := p.scr.TakeClipboard()
 			bell := p.scr.TakeBell()
 			p.mu.Unlock()
+			rest = rest[n:]
 
 			if bell && time.Since(lastBell) >= bellInterval {
 				lastBell = time.Now()
@@ -144,6 +158,8 @@ func (p *pane) pump(r io.Reader, onChunk func()) {
 			for _, text := range clips {
 				render.SetClipboard(text)
 			}
+		}
+		if len(data) > 0 {
 			onChunk()
 		}
 		if err != nil {

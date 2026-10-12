@@ -380,3 +380,28 @@ func TestColonSubParameters(t *testing.T) {
 		}
 	}
 }
+
+// With TextRuns, printable ASCII comes as one event per run, and everything
+// else exactly as before.
+func TestTextRuns(t *testing.T) {
+	p := New()
+	p.TextRuns = true
+	var got []string
+	emit := func(e Event) { got = append(got, e.Clone().String()) }
+	p.Parse([]byte("hello \x1b[1mworld\r\n\xc3\xa9t\xc3"), emit)
+	p.Parse([]byte("\xa9 end"), emit)
+	want := []string{
+		`TEXT    "hello "`,
+		New().ParseAll([]byte("\x1b[1m"))[0].String(),
+		`TEXT    "world"`,
+		New().ParseAll([]byte("\r"))[0].String(),
+		New().ParseAll([]byte("\n"))[0].String(),
+		`PRINT   'é'`,
+		`TEXT    "t"`,
+		`PRINT   'é'`,
+		`TEXT    " end"`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
