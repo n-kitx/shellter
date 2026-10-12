@@ -1,4 +1,4 @@
-# Feature gaps
+# Roadmap
 
 What Shellter is missing next to a production terminal (Terminal.app, iTerm2,
 Ghostty, WezTerm, kitty), and where in the code each piece would go. This is the

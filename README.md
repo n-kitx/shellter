@@ -140,5 +140,5 @@ go run ./cmd/shellter -gui          # run without bundling
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how Shellter works:
   the parser, the screen, the Metal renderer, and every measurement behind
   the design.
-- [FEATURES.md](FEATURES.md) lists what is still missing compared with
+- [docs/ROADMAP.md](docs/ROADMAP.md) lists what is still missing compared with
   other terminals.

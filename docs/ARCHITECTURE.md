@@ -1684,7 +1684,7 @@ reconstructed purely from events, never from the raw bytes.
 ## Not implemented yet
 
 Every known gap - next to Terminal.app, iTerm2, Ghostty and the rest - is kept
-in [FEATURES.md](../FEATURES.md), with where in the code each would go. That file
+in [ROADMAP.md](ROADMAP.md), with where in the code each would go. That file
 is the one list; this README describes what exists.
 
 **Verification.** The GUI has never been looked at by a human in this project:
