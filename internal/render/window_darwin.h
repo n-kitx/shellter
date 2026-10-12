@@ -109,8 +109,10 @@ void shellterFillCells(int row, int col, int width, unsigned int rgb);
 void shellterDrawGlyph(int row, int col, int kind, int a, int b, int c, int d, unsigned int rgb,
                        unsigned int bg);
 // width is how many cells the run covers; ul is the underline's colour.
-void shellterDrawText(int row, int col, int width, const char *utf8, int len, unsigned int rgb,
-                      unsigned int flags, unsigned int ul);
+// starts are the byte offsets at which each of ncells cells begins; NULL
+// means one byte per cell, all ASCII.
+void shellterDrawText(int row, int col, int width, const char *utf8, int len, const int *starts,
+                      int ncells, unsigned int rgb, unsigned int flags, unsigned int ul);
 // shellterBeginPane clips everything drawn until shellterEndPane to one pane's
 // rectangle, so a pane whose grid is momentarily the wrong size cannot paint
 // over its neighbour.

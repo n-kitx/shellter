@@ -2,7 +2,7 @@ package render
 
 /*
 #cgo CFLAGS: -x objective-c -Wno-deprecated-declarations
-#cgo LDFLAGS: -framework Cocoa -framework Carbon
+#cgo LDFLAGS: -framework Cocoa -framework Carbon -framework Metal -framework QuartzCore -framework CoreText
 #include <stdlib.h>
 #include "window_darwin.h"
 */
@@ -423,8 +423,20 @@ func drawPane(p Pane, defaultBG uint32, faded bool) {
 				ul = fade(ul, defaultBG)
 			}
 		}
+		// A span whose text is a byte a cell - plain ASCII, nearly every
+		// span - needs no list of where its cells start.
+		var starts *C.int
+		n := sp.Width
+		if len(sp.Text) != sp.Width {
+			startsBuf = cellStarts(sp.Text, startsBuf[:0])
+			n = len(startsBuf)
+			if n > 0 {
+				starts = (*C.int)(unsafe.Pointer(&startsBuf[0]))
+			}
+		}
 		C.shellterDrawText(C.int(row+sp.Row), C.int(col+sp.Col), C.int(sp.Width),
-			bytesOf(sp.Text), C.int(len(sp.Text)), C.uint(fg), C.uint(sp.Flags), C.uint(ul))
+			bytesOf(sp.Text), C.int(len(sp.Text)), starts, C.int(n),
+			C.uint(fg), C.uint(sp.Flags), C.uint(ul))
 	}
 
 	// Only the focused pane shows a cursor: two cursors on screen would both
@@ -447,6 +459,9 @@ func drawPane(p Pane, defaultBG uint32, faded bool) {
 		bytesOf(glyph), C.int(len(glyph)),
 		C.uint(cell.FG), C.uint(cell.BG), C.int(f.CursorStyle))
 }
+
+// startsBuf is cellStarts' scratch. Drawing happens on the main thread only.
+var startsBuf []int32
 
 // drawOverlays paints what goes over a pane's text: the scroll indicator and
 // the visual bell.

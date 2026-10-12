@@ -228,7 +228,7 @@ or mouse-tracking mode to the window.
 ```text
                        ┌──────────────── UI thread ────────────────┐
 PTY read goroutine     │                                           │
-  parser.Parse         │  drawRect: ──► shellterGoRender ──► draw()
+  parser.Parse         │  displayLayer: ─► shellterGoRender ─► draw()
   screen.Apply  ◄─ mu ─┼───────────────────────► Snapshot, per pane
   render.Redraw() ─────┼─► setNeedsDisplay:YES                     │
                        │  keyDown:   ──► shellterGoKey  ──► sess.Write
@@ -237,7 +237,7 @@ PTY read goroutine     │                                           │
 ```
 
 * **Two threads, one mutex.** The goroutine reading the PTY writes to the
-  screen; AppKit draws from the UI thread. The lock is held only long enough to
+  screen; the UI thread draws it. The lock is held only long enough to
   apply a chunk of events or to copy a `Snapshot`.
 * **The frame is pulled, not pushed.** `Redraw()` only marks the view dirty;
   AppKit then asks Go for the layout when it is ready to paint. Repeated
@@ -518,6 +518,8 @@ each line of output.
 | Reuse the two per-frame grids | a redraw copied the screen twice into new memory | a frame allocates **nothing** |
 | Pass Go bytes to AppKit, not `C.CString` | a malloc and a free per span | 10µs a frame gone |
 | 16 KB PTY reads, not 4 KB | measured on a real PTY: 155 → 193 MB/s | end to end +20% |
+| ASCII text in runs (`TextRuns`, `printASCII`) | one event and one cell write per character | absorbing text 44 → 130 MB/s |
+| Read on a goroutine of its own (`readAhead`) | macOS reads a PTY ~1 KB at a time, and reading and parsing took turns | end to end 105 → 170 MB/s |
 
 ### Before and after
 
@@ -531,12 +533,31 @@ each line of output.
 | split a frame into spans | 64µs, 194 allocs | **16µs, 98 allocs** |
 | resize the grid | 87µs, 6 allocs | **32µs, 3 allocs** |
 | **one redraw, end to end** | ~127µs | **~35µs** |
-| **output through a real PTY** | 24 MB/s | **41 MB/s** |
+| **output through a real PTY** | 24 MB/s | **41 MB/s**, then **170 MB/s** |
 
-The last line is the one that matters, and it is also the one that says where
-the remaining headroom is: draining the same PTY without parsing runs at
-193 MB/s, so the screen is still the slow part. It is fast enough that a redraw
-uses a fortieth of a 60-frames-a-second budget, which is where this stops.
+The last line is the one that matters. It reached 41 MB/s with every change
+above the last two, and stopped there because the work was per character: the
+parser handed the screen one event for every byte of `ls`, and the screen wrote
+one cell for each. Most of what a terminal is shown is plain ASCII, so the
+parser now hands over each run of it as one event, and the screen copies the
+run into the row in one loop, cleaning up only the wide characters at its two
+ends. A test feeds the same bytes both ways - wide characters, autowrap off,
+insert mode, line drawing, one-column screens, random input, a fuzzer - and
+requires identical screens.
+
+That took absorbing text from 44 to 130 MB/s and a real `cat` from 40 to 105.
+Then the profile was 97% `read`: macOS gives a PTY's output a kilobyte per
+system call, and a pane read, then parsed, then read again. Draining the PTY
+alone runs at 236 MB/s and parsing alone at about 190, but taking turns they
+add up. Reading now happens on a goroutine of its own that queues what it reads
+while the parser works, and the parser takes the whole queue at once - so the
+two overlap, and a flood is parsed in big pieces while a keystroke's echo still
+goes straight through. The queue stops at 256 KB, which makes a program that
+prints faster than Shellter can keep up wait, as a terminal should, instead of
+using memory; and parsing holds the pane's lock for at most 64 KB at a time, so
+a frame is never kept waiting more than about half a millisecond.
+
+`cat` of 53 MB, plain or in colour: **40 MB/s before, 170 MB/s after.**
 
 ### Scrolling by index
 
@@ -1380,19 +1401,63 @@ valid answer, a wrong one is not.
 
 ## Drawing attributed cells
 
-`drawRect:` hands control straight back to Go, which walks the frame and calls
-AppKit once per **span** - a horizontal stretch of cells sharing an appearance:
+A redraw hands control straight back to Go, which walks the frame and calls
+into Objective-C once per **span** - a horizontal stretch of cells sharing an
+appearance:
 
 ```text
-drawRect:  ──►  shellterGoRender  ──►  shellterClear
-                (Go loops)        ──►  shellterFillCells  (per span)
-                                  ──►  shellterDrawText   (per span)
-                                  ──►  shellterDrawCursor
+displayLayer:  ──►  shellterGoRender  ──►  shellterClear
+                    (Go loops)        ──►  shellterFillCells  (per span)
+                                      ──►  shellterDrawText   (per span)
+                                      ──►  shellterDrawCursor
+               ──►  mtrEndFrame: one GPU pass
 ```
 
 A shell line is usually one or two spans, so an 80x24 screen costs a few dozen
-draw calls rather than nearly two thousand - and the grid never has to be
+calls rather than nearly two thousand - and the grid never has to be
 serialised across the cgo boundary.
+
+### Drawn with Metal
+
+None of those calls draws anything. Each adds an *instance* to the frame - a
+rectangle, or a glyph out of a texture atlas - and when Go is done the frame
+goes to the GPU in six instanced draw calls, whatever is on screen: three
+layers (backgrounds; text and lines; the cursor and everything over it),
+rectangles then glyphs in each (`metal_darwin.m`).
+
+Text used to be drawn by `NSString drawAtPoint:`, which lays out and
+rasterises every span on the CPU every frame, into a window-sized bitmap that
+AppKit then copies to the screen. Now a character is laid out and rasterised by
+Core Text **once**, the first time it is seen in a face, into a slot of the
+atlas; every frame after that it is one 56-byte instance pointing at the slot.
+One ASCII character in one cell is found in a table, without hashing anything.
+Box drawing, blocks, Powerline and the patterned underlines go through the same
+cache as shapes; rounded corners (the scroll indicator) are a distance field in
+the fragment shader.
+
+For one slot to serve every cell, a character has to look the same in every
+cell, so **cells are a whole number of pixels wide** - what Ghostty, Kitty and
+Alacritty do. The font's own advance is at most half a pixel away, and box
+drawing now meets the next cell exactly at any size. Moving the window to a
+screen with another scale measures the cell again.
+
+Glyphs are rasterised white on opaque black with font smoothing on, so text
+keeps the weight it has everywhere else on the Mac, and the green channel is
+the coverage; emoji go to a second, colour page made only when the first one
+appears. Shaders are compiled from source at launch (the Command Line Tools
+have no Metal compiler) in 8-15 ms.
+
+Measured with a full-screen window (175x52 cells) and a program printing
+coloured text as fast as it can, at 120 frames a second:
+
+| | AppKit | Metal |
+| --- | --- | --- |
+| main thread | 47% of a core | **9-14%** |
+| whole process | 103% of a core | **66-82%** |
+| memory | 228 MB | **78 MB** |
+
+What is left on the main thread is Go building the frame - `spans` and the
+palette - not drawing it.
 
 ## Keyboard input
 

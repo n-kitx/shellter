@@ -164,9 +164,16 @@ rather than rediscovering the state by reading the code.
 - [ ] Ligatures, bold-as-bright.
 - [ ] Grapheme clusters: width is per rune plus combining marks, so ZWJ emoji
       and flags take one cell per component (`text/width.go`).
-- [ ] GPU (Metal) rendering. Today it is `NSString drawAtPoint:` per run.
-- [ ] Throughput: the screen parses at ~37-43 MB/s against a PTY that can deliver
-      ~193. The next profile starts at `Screen.print`.
+- [x] GPU (Metal) rendering (`metal_darwin.m`): instanced rectangles and
+      glyphs from a Core Text-rasterised atlas, six draw calls a frame; cells
+      are whole pixels wide. Streaming at 120 fps: main thread 47% -> ~12% of
+      a core, memory 228 -> 78 MB. Next: the Go side of a frame (`spans`,
+      `Palette.FrameInto`) is now most of what is left.
+- [x] Throughput: ASCII text is parsed and printed in runs (`TextRuns`,
+      `printASCII`), and the PTY is read on its own goroutine (`readAhead`) so
+      reading and parsing overlap. `cat` of 53 MB: 40 -> 170 MB/s; the PTY
+      alone drains at ~236. What is left is the per-line work (scrollback
+      trimming, `isPlainBlank`) and escape sequences.
 
 ## Configuration
 

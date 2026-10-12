@@ -9,6 +9,7 @@
 
 #import <Cocoa/Cocoa.h>
 #import <Carbon/Carbon.h> // EnableSecureEventInput
+#import "metal_darwin.h"
 #include <stdlib.h>
 #include <string.h>
 #include "window_darwin.h"
@@ -144,7 +145,8 @@ static NSColor *chromeAccent(void) { return rgb(0x4c, 0x8e, 0xda); }
 static NSColor *chromeEdge(void) { return shade(gChromeRGB, 0.18, 1.0); }
 
 // The line between two panes.
-static NSColor *dividerColor(void) { return rgba(0x7a, 0x82, 0x94, 0.55); }
+static const unsigned int kDividerRGB = 0x7a8294;
+static const double kDividerAlpha = 0.55;
 
 // Cursor shapes, matching render.CursorStyle.
 enum {
@@ -198,49 +200,24 @@ enum {
     kFlagUnderlineDashed = 1 << 8,
 };
 
-static NSColor *colorFromRGB(unsigned int rgb) {
-    return [NSColor colorWithSRGBRed:((rgb >> 16) & 0xff) / 255.0
-                               green:((rgb >> 8) & 0xff) / 255.0
-                                blue:(rgb & 0xff) / 255.0
-                               alpha:1.0];
-}
-
-// colorWithOpacity is colorFromRGB with the window's translucency applied. Only
-// the default background uses it.
-static NSColor *colorWithOpacity(unsigned int rgb) {
-    return [colorFromRGB(rgb) colorWithAlphaComponent:gOpacity];
-}
-
-static NSFont *fontForFlags(unsigned int flags) {
-    if ((flags & kFlagBold) && (flags & kFlagItalic)) {
-        return gFontBoldItalic;
-    }
-    if (flags & kFlagBold) {
-        return gFontBold;
-    }
-    if (flags & kFlagItalic) {
-        return gFontItalic;
-    }
-    return gFont;
-}
-
 // ---------------------------------------------------------------------------
 // The view
 // ---------------------------------------------------------------------------
+
+// viewScale is how many pixels make a point where the window is: 2 on a
+// Retina screen. Before there is a window, the main screen's.
+static double viewScale(void) {
+    double s = gWindow != nil ? [gWindow backingScaleFactor] : [[NSScreen mainScreen] backingScaleFactor];
+    return s > 0 ? s : 1;
+}
+
+static double underlineAt(double top, double *thickness);
+static void setFontSize(double size);
 
 // cellOrigin is the top-left pixel of a cell, padding included. Everything that
 // draws goes through it, so the inset is defined once.
 static NSPoint cellOrigin(int row, int col) {
     return NSMakePoint(gPad + col * gCharWidth, gPad + row * gLineHeight);
-}
-
-// textOrigin is where a glyph is drawn in a cell: its top, lowered by half of
-// whatever the line-height setting added, so text sits in the middle of a
-// taller row rather than at its top.
-static NSPoint textOrigin(int row, int col) {
-    NSPoint o = cellOrigin(row, col);
-    o.y += gTextInset;
-    return o;
 }
 
 // Text being composed by an input method - a Japanese reading before it is
@@ -325,14 +302,34 @@ static NSTimer *gDragTimer = nil;
     return NO;
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+// The view draws with Metal: its layer is a CAMetalLayer, and a redraw is
+// updateLayer building a frame and handing it to the GPU (metal_darwin.m).
+- (BOOL)wantsUpdateLayer {
+    return YES;
+}
+
+- (CALayer *)makeBackingLayer {
+    return mtrMakeLayer();
+}
+
+// AppKit does not route a CAMetalLayer's display to updateLayer by itself;
+// the layer asks its delegate, the view, directly.
+- (void)displayLayer:(CALayer *)layer {
+    [self updateLayer];
+}
+
+- (void)updateLayer {
     // Go drives the painting: it calls shellterClear, then one fill and one
     // text call per span, then the cursor. Keeping the loop on the Go side
-    // means the grid never has to be copied across the boundary.
+    // means the grid never has to be copied across the boundary. Each call
+    // adds to the frame; mtrEndFrame draws it.
+    NSRect bounds = [self bounds];
+    mtrBeginFrame(NSWidth(bounds), NSHeight(bounds), viewScale());
     gDividerCount = 0;
     gThumbCount = 0;
     shellterGoRender();
     [self drawMarkedText];
+    mtrEndFrame((CAMetalLayer *)[self layer], [self inLiveResize]);
 
     // Cursor rects are rebuilt only when a divider actually moved: most frames
     // are text arriving, and change nothing about where the panes are.
@@ -361,16 +358,14 @@ static NSTimer *gDragTimer = nil;
         return;
     }
     NSString *text = [gMarked string];
-    NSDictionary *attrs = @{
-        NSFontAttributeName : gFont,
-        NSForegroundColorAttributeName : colorFromRGB(gCursorFG),
-        NSUnderlineStyleAttributeName : @(NSUnderlineStyleSingle),
-    };
-    double w = ceil([text sizeWithAttributes:attrs].width / gCharWidth) * gCharWidth;
+    double natural = [text sizeWithAttributes:@{NSFontAttributeName : gFont}].width;
+    double w = ceil(natural / gCharWidth) * gCharWidth;
     NSPoint o = cellOrigin(gCursorRow, gCursorCol);
-    [colorFromRGB(gCursorBG) setFill];
-    NSRectFill(NSMakeRect(o.x, o.y, w, gLineHeight));
-    [text drawAtPoint:NSMakePoint(o.x, o.y + gTextInset) withAttributes:attrs];
+    mtrRect(kLayerTop, NSMakeRect(o.x, o.y, w, gLineHeight), gCursorBG, 1, 0);
+    mtrString(kLayerTop, o, text, gFont, gCursorFG);
+    double t;
+    double y = underlineAt(o.y, &t);
+    mtrRect(kLayerTop, NSMakeRect(o.x, y, natural, t), gCursorFG, 1, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -933,6 +928,17 @@ char *shellterClipboard(void) {
 // ---------------------------------------------------------------------------
 // Resizing
 // ---------------------------------------------------------------------------
+
+// Moved to a screen with another scale: the cell is measured in pixels, so it
+// is measured again, and the grid may gain or lose a column.
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    if (gFont != nil) {
+        setFontSize(gFontSize);
+        [self setFrameSize:[self frame].size];
+        [self setNeedsDisplay:YES];
+    }
+}
 
 - (void)setFrameSize:(NSSize)newSize {
     [super setFrameSize:newSize];
@@ -1885,11 +1891,19 @@ static void setFontSize(double size) {
     gFontBoldItalic = [boldItalic retain];
     gFontSize = size;
 
-    gCharWidth = [@"M" sizeWithAttributes:@{NSFontAttributeName : gFont}].width;
+    // The cell is a whole number of pixels wide, as every GPU terminal makes
+    // it: then a character looks the same in every cell, one cached glyph
+    // serves them all, and box drawing meets its neighbour exactly. The
+    // font's own advance is at most half a pixel away.
+    double scale = viewScale();
+    double advance = [@"M" sizeWithAttributes:@{NSFontAttributeName : gFont}].width;
+    gCharWidth = MAX(1, round(advance * scale)) / scale;
     NSLayoutManager *layout = [[[NSLayoutManager alloc] init] autorelease];
     double natural = [layout defaultLineHeightForFont:gFont];
     gLineHeight = round(natural * gLineScale);
     gTextInset = floor((gLineHeight - natural) / 2);
+    NSFont *faces[4] = {gFont, gFontBold, gFontItalic, gFontBoldItalic};
+    mtrSetFonts(faces, gCharWidth, gLineHeight, gTextInset);
 }
 
 // zoomText changes the font size and keeps the window where it is: the grid
@@ -2396,6 +2410,12 @@ void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
             gFontName = [[NSString stringWithUTF8String:fontFamily] retain];
         }
         [NSApplication sharedApplication];
+        // Every Mac that runs a supported macOS has Metal; one that somehow
+        // does not gets told so rather than a blank window.
+        if (!mtrInit()) {
+            fprintf(stderr, "shellter: no Metal device to draw with\n");
+            exit(1);
+        }
         // Keys go through the text input system now, and with press-and-hold
         // on, holding one down offers accented letters instead of repeating
         // it - which is not what holding j in vim is for. Only our default is
@@ -2473,6 +2493,8 @@ void shellterRun(const char *title, int rows, int cols, const char *fontFamily,
         gTabBar = tabBar;
         ShellterView *view = [[ShellterView alloc] initWithFrame:frame];
         gView = view;
+        [view setWantsLayer:YES];
+        [view setLayerContentsRedrawPolicy:NSViewLayerContentsRedrawDuringViewResize];
         [content addSubview:tabBar];
         [content addSubview:view];
 
@@ -2696,19 +2718,15 @@ void shellterStop(void) {
 // ---------------------------------------------------------------------------
 
 void shellterClear(unsigned int rgb) {
-    // Source-over, and the colour carries the window's opacity: the default
-    // background is the one surface the desktop shows through. Cells that ask
-    // for a colour of their own stay solid, or coloured output would turn
-    // milky.
-    [colorWithOpacity(rgb) setFill];
-    NSRectFillUsingOperation([gView bounds], NSCompositingOperationSourceOver);
+    // The colour carries the window's opacity: the default background is the
+    // one surface the desktop shows through. Cells that ask for a colour of
+    // their own stay solid, or coloured output would turn milky.
+    mtrClear(rgb, gOpacity);
 }
 
 void shellterFillCells(int row, int col, int width, unsigned int rgb) {
     NSPoint o = cellOrigin(row, col);
-    NSRect r = NSMakeRect(o.x, o.y, width * gCharWidth, gLineHeight);
-    [colorFromRGB(rgb) setFill];
-    NSRectFill(r);
+    mtrRect(kLayerBack, NSMakeRect(o.x, o.y, width * gCharWidth, gLineHeight), rgb, 1, 0);
 }
 
 // cellRect is the pixel rectangle a block of cells covers.
@@ -2718,18 +2736,17 @@ static NSRect cellRect(int row, int col, int rows, int cols) {
 }
 
 void shellterBeginPane(int row, int col, int rows, int cols) {
-    [NSGraphicsContext saveGraphicsState];
     // A pane's own grid and the rectangle the layout gave it can disagree for
     // a single frame - a split is arranged before the shells have been told
     // their new size - and a pane drawing over its neighbour would be visible.
     // Clipping makes the disagreement harmless instead of having to be
     // prevented. The extra point of room is for glyphs that hang below the
     // last row, which clipping to exact cells would shave off.
-    NSRectClip(NSInsetRect(cellRect(row, col, rows, cols), -1, -1));
+    mtrClip(NSInsetRect(cellRect(row, col, rows, cols), -1, -1));
 }
 
 void shellterEndPane(void) {
-    [NSGraphicsContext restoreGraphicsState];
+    mtrNoClip();
 }
 
 void shellterDrawDivider(int row, int col, int rows, int cols) {
@@ -2765,19 +2782,7 @@ void shellterDrawDivider(int row, int col, int rows, int cols) {
         line.origin.x = left;
         line.size.width = right - left;
     }
-    [dividerColor() setFill];
-    NSRectFillUsingOperation(line, NSCompositingOperationSourceOver);
-}
-
-// stringFrom wraps borrowed bytes without needing them NUL-terminated. The
-// NSString copies them, so Go's memory is free the moment this returns.
-static NSString *stringFrom(const char *utf8, int len) {
-    if (utf8 == NULL || len <= 0) {
-        return nil;
-    }
-    return [[[NSString alloc] initWithBytes:utf8
-                                     length:(NSUInteger)len
-                                   encoding:NSUTF8StringEncoding] autorelease];
+    mtrRect(kLayerTop, line, kDividerRGB, kDividerAlpha, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -2876,13 +2881,13 @@ static void carveDouble(NSRect cell, int up, int right, int down, int left, NSCo
     }
 }
 
-void shellterDrawGlyph(int row, int col, int kind, int a, int b, int c, int d, unsigned int rgb,
-                       unsigned int bg) {
-    NSPoint o = cellOrigin(row, col);
-    NSRect cell = NSMakeRect(o.x, o.y, gCharWidth, gLineHeight);
+// drawBoxShape draws a box-drawing, block or Powerline character filling
+// cell, in color; a double line's gap is cut out in bg. It draws into the
+// glyph cache, once per shape: ink is white there and the gap is black.
+static void drawBoxShape(NSRect cell, int kind, int a, int b, int c, int d, NSColor *color,
+                         NSColor *bg) {
     double x = NSMinX(cell), y = NSMinY(cell), w = NSWidth(cell), h = NSHeight(cell);
     double cx = NSMidX(cell), cy = NSMidY(cell), t = lineWidth();
-    NSColor *color = colorFromRGB(rgb);
     [color setFill];
     [color setStroke];
 
@@ -2895,7 +2900,7 @@ void shellterDrawGlyph(int row, int col, int kind, int a, int b, int c, int d, u
         drawArm(cell, NO, YES, c, hStem);   // down
         drawArm(cell, NO, NO, a, hStem);    // up
         if (a == 3 || b == 3 || c == 3 || d == 3) {
-            carveDouble(cell, a, b, c, d, colorFromRGB(bg));
+            carveDouble(cell, a, b, c, d, bg);
         }
         break;
     }
@@ -3003,61 +3008,132 @@ void shellterDrawGlyph(int row, int col, int kind, int a, int b, int c, int d, u
     }
 }
 
-// drawWave draws the wavy underline - an error or a misspelling in an editor
-// - under width cells. AppKit has no such underline style, so it is a path:
-// half-waves two points long, a point and a half either side of where a
-// straight underline would sit.
-static void drawWave(int row, int col, int width, NSColor *color) {
-    NSPoint o = textOrigin(row, col);
-    double y = o.y + [gFont ascender] - [gFont underlinePosition] + 1;
-    double maxY = cellOrigin(row, col).y + gLineHeight - 1.5;
-    if (y > maxY) {
-        y = maxY; // a tight line height: keep it inside the row
-    }
-    double x = o.x, end = o.x + width * gCharWidth, half = 2, amp = 1.5;
-    NSBezierPath *wave = [NSBezierPath bezierPath];
-    [wave moveToPoint:NSMakePoint(x, y)];
-    for (int i = 0; x < end; i++, x += half) {
-        double peak = (i % 2 == 0) ? y - amp : y + amp;
-        [wave curveToPoint:NSMakePoint(x + half, y)
-             controlPoint1:NSMakePoint(x + half / 2, peak)
-             controlPoint2:NSMakePoint(x + half / 2, peak)];
-    }
-    [wave setLineWidth:1];
-    [color setStroke];
-    [wave stroke];
+void shellterDrawGlyph(int row, int col, int kind, int a, int b, int c, int d, unsigned int rgb,
+                       unsigned int bg) {
+    unsigned char key[6] = {'B', (unsigned char)kind, (unsigned char)a, (unsigned char)b,
+                            (unsigned char)c, (unsigned char)d};
+    mtrShape(kLayerText, cellOrigin(row, col), NSMakeSize(gCharWidth, gLineHeight), key, sizeof key,
+             rgb, ^(NSRect cell) {
+               drawBoxShape(cell, kind, a, b, c, d, [NSColor whiteColor], [NSColor blackColor]);
+             });
 }
 
-void shellterDrawText(int row, int col, int width, const char *utf8, int len, unsigned int rgb,
-                      unsigned int flags, unsigned int ul) {
-    NSString *text = stringFrom(utf8, len);
-    if (text == nil) {
+// snap rounds a length in points to whole pixels, so a line is as sharp as
+// the screen can make it.
+static double snap(double v) {
+    double s = [gWindow backingScaleFactor] > 0 ? [gWindow backingScaleFactor] : 2;
+    return round(v * s) / s;
+}
+
+// underlineAt is where an underline sits in a row whose top is top, and how
+// thick it is: where the font says, kept inside the row however tight the
+// line height.
+static double underlineAt(double top, double *thickness) {
+    double t = MAX(snap([gFont underlineThickness]), snap(1));
+    double y = snap(top + gTextInset + [gFont ascender] - [gFont underlinePosition]);
+    if (y + t > top + gLineHeight) {
+        y = top + gLineHeight - t;
+    }
+    *thickness = t;
+    return y;
+}
+
+// The patterned underlines are shapes, one per cell, each a whole number of
+// repeats of its pattern so that a run of cells reads as one line.
+enum { kULDotted = 1, kULDashed = 2, kULWavy = 3 };
+
+static void drawUnderlinePattern(NSRect cell, int style, double y, double t) {
+    [[NSColor whiteColor] set];
+    double x = NSMinX(cell), w = NSWidth(cell);
+    if (style == kULWavy) {
+        // Two waves to a cell, each half-wave a curve either side of where a
+        // straight underline would sit.
+        double amp = 1.5, half = w / 4;
+        double mid = MIN(y + t / 2, NSMaxY(cell) - amp - 0.5);
+        NSBezierPath *wave = [NSBezierPath bezierPath];
+        [wave moveToPoint:NSMakePoint(x, mid)];
+        for (int i = 0; i < 4; i++) {
+            double peak = (i % 2 == 0) ? mid - amp : mid + amp;
+            [wave curveToPoint:NSMakePoint(x + (i + 1) * half, mid)
+                 controlPoint1:NSMakePoint(x + (i + 0.5) * half, peak)
+                 controlPoint2:NSMakePoint(x + (i + 0.5) * half, peak)];
+        }
+        [wave setLineWidth:1];
+        [wave stroke];
         return;
     }
-    NSMutableDictionary *attrs = [[@{
-        NSFontAttributeName : fontForFlags(flags),
-        NSForegroundColorAttributeName : colorFromRGB(rgb),
-    } mutableCopy] autorelease];
-    BOOL wavy = (flags & kFlagUnderline) && (flags & kFlagUnderlineCurly);
-    if ((flags & kFlagUnderline) && !wavy) {
-        NSUnderlineStyle style = NSUnderlineStyleSingle;
-        if (flags & kFlagUnderlineDouble) {
-            style = NSUnderlineStyleDouble;
-        } else if (flags & kFlagUnderlineDotted) {
-            style |= NSUnderlineStylePatternDot;
-        } else if (flags & kFlagUnderlineDashed) {
-            style |= NSUnderlineStylePatternDash;
+    double dash = style == kULDotted ? t : 3 * t, gap = style == kULDotted ? t : 2 * t;
+    int n = MAX(1, (int)round(w / (dash + gap)));
+    double period = w / n;
+    for (int i = 0; i < n; i++) {
+        NSRectFill(NSMakeRect(snap(x + i * period), y, snap(dash), t));
+    }
+}
+
+// drawDecorations draws a span's underline and strikethrough.
+static void drawDecorations(int row, int col, int width, unsigned int flags, unsigned int ul,
+                            unsigned int fg) {
+    NSPoint o = cellOrigin(row, col);
+    double t;
+    double y = underlineAt(o.y, &t);
+    if (flags & kFlagUnderline) {
+        int style = (flags & kFlagUnderlineCurly)    ? kULWavy
+                    : (flags & kFlagUnderlineDotted) ? kULDotted
+                    : (flags & kFlagUnderlineDashed) ? kULDashed
+                                                     : 0;
+        if (style != 0) {
+            unsigned char key[2] = {'U', (unsigned char)style};
+            for (int i = 0; i < width; i++) {
+                mtrShape(kLayerText, NSMakePoint(o.x + i * gCharWidth, o.y),
+                         NSMakeSize(gCharWidth, gLineHeight), key, sizeof key, ul, ^(NSRect cell) {
+                           drawUnderlinePattern(cell, style, NSMinY(cell) + (y - o.y), t);
+                         });
+            }
+        } else if (flags & kFlagUnderlineDouble) {
+            double y2 = y + 2 * t;
+            if (y2 + t > o.y + gLineHeight) { // no room below: the pair goes up
+                y2 = y;
+                y -= 2 * t;
+            }
+            mtrRect(kLayerText, NSMakeRect(o.x, y, width * gCharWidth, t), ul, 1, 0);
+            mtrRect(kLayerText, NSMakeRect(o.x, y2, width * gCharWidth, t), ul, 1, 0);
+        } else {
+            mtrRect(kLayerText, NSMakeRect(o.x, y, width * gCharWidth, t), ul, 1, 0);
         }
-        attrs[NSUnderlineStyleAttributeName] = @(style);
-        attrs[NSUnderlineColorAttributeName] = colorFromRGB(ul);
     }
     if (flags & kFlagStrike) {
-        attrs[NSStrikethroughStyleAttributeName] = @(NSUnderlineStyleSingle);
+        double sy = snap(o.y + gTextInset + [gFont ascender] - [gFont xHeight] / 2 - t / 2);
+        mtrRect(kLayerText, NSMakeRect(o.x, sy, width * gCharWidth, t), fg, 1, 0);
     }
-    [text drawAtPoint:textOrigin(row, col) withAttributes:attrs];
-    if (wavy) {
-        drawWave(row, col, width, colorFromRGB(ul));
+}
+
+// faceFor is which of the four faces a span's flags ask for.
+static int faceFor(unsigned int flags) {
+    return ((flags & kFlagBold) ? 1 : 0) | ((flags & kFlagItalic) ? 2 : 0);
+}
+
+void shellterDrawText(int row, int col, int width, const char *utf8, int len, const int *starts,
+                      int ncells, unsigned int rgb, unsigned int flags, unsigned int ul) {
+    if (utf8 == NULL || len <= 0) {
+        return;
     }
+    NSPoint o = cellOrigin(row, col);
+    int face = faceFor(flags);
+    if (starts == NULL) {
+        // A byte to a cell: the text is all ASCII.
+        for (int i = 0; i < len && i < width; i++) {
+            mtrText(kLayerText, NSMakePoint(o.x + i * gCharWidth, o.y), 1, utf8 + i, 1, face, rgb);
+        }
+    } else if (ncells == 1) {
+        mtrText(kLayerText, o, width, utf8, len, face, rgb); // one character, perhaps wide
+    } else {
+        for (int i = 0; i < ncells; i++) {
+            int from = starts[i], to = i + 1 < ncells ? starts[i + 1] : len;
+            mtrText(kLayerText, NSMakePoint(o.x + i * gCharWidth, o.y), 1, utf8 + from, to - from,
+                    face, rgb);
+        }
+    }
+    drawDecorations(row, col, width, flags, ul, rgb);
 }
 
 // The cursor is drawn last, over the text.
@@ -3073,31 +3149,19 @@ void shellterDrawCursor(int row, int col, int width, const char *utf8, int len,
     gCursorFG = fg;
     gCursorBG = bg;
     NSPoint o = cellOrigin(row, col);
-    double x = o.x, y = o.y;
 
     if (style == kCursorUnderline) {
-        [colorFromRGB(fg) setFill];
-        NSRectFill(NSMakeRect(x, y + gLineHeight - 2, width * gCharWidth, 2));
+        mtrRect(kLayerTop, NSMakeRect(o.x, o.y + gLineHeight - 2, width * gCharWidth, 2), fg, 1, 0);
         return;
     }
     if (style == kCursorBar) {
-        [colorFromRGB(fg) setFill];
-        NSRectFill(NSMakeRect(x, y, 2, gLineHeight));
+        mtrRect(kLayerTop, NSMakeRect(o.x, o.y, 2, gLineHeight), fg, 1, 0);
         return;
     }
-
     // width is 2 when the cursor sits on a wide character, so the block covers
     // the whole glyph rather than half of it.
-    shellterFillCells(row, col, width, fg);
-    NSString *text = stringFrom(utf8, len);
-    if (text == nil) {
-        return;
-    }
-    [text drawAtPoint:NSMakePoint(x, y + gTextInset)
-       withAttributes:@{
-           NSFontAttributeName : gFont,
-           NSForegroundColorAttributeName : colorFromRGB(bg),
-       }];
+    mtrRect(kLayerTop, NSMakeRect(o.x, o.y, width * gCharWidth, gLineHeight), fg, 1, 0);
+    mtrText(kLayerTop, o, width, utf8, len, 0, bg);
 }
 
 // ---------------------------------------------------------------------------
@@ -3201,19 +3265,15 @@ void shellterDrawScrollbar(int row, int col, int rows, int cols, int above,
     if (!shown && !hot) {
         return;
     }
-    NSColor *c = colorFromRGB(rgb);
     if (hot) {
         w = 8;
         NSRect groove = NSMakeRect(mid - w / 2 - 1, NSMinY(cells), w + 2, h);
-        [[c colorWithAlphaComponent:0.08] setFill];
-        [[NSBezierPath bezierPathWithRoundedRect:groove xRadius:w / 2 + 1 yRadius:w / 2 + 1] fill];
+        mtrRect(kLayerTop, groove, rgb, 0.08, w / 2 + 1);
     }
     NSRect thumb = NSMakeRect(mid - w / 2, ty, w, th);
-    [[c colorWithAlphaComponent:gThumbDragging && hot ? 0.75 : hot ? 0.6 : 0.4] setFill];
-    [[NSBezierPath bezierPathWithRoundedRect:thumb xRadius:w / 2 yRadius:w / 2] fill];
+    mtrRect(kLayerTop, thumb, rgb, gThumbDragging && hot ? 0.75 : hot ? 0.6 : 0.4, w / 2);
 }
 
 void shellterFlash(int row, int col, int rows, int cols, unsigned int rgb) {
-    [[colorFromRGB(rgb) colorWithAlphaComponent:0.18] setFill];
-    NSRectFillUsingOperation(paneArea(row, col, rows, cols), NSCompositingOperationSourceOver);
+    mtrRect(kLayerTop, paneArea(row, col, rows, cols), rgb, 0.18, 0);
 }

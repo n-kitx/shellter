@@ -190,6 +190,18 @@ type Span struct {
 // emoji glyph to be exactly two cells wide, and it usually is not: the rest of
 // the line would drift. One span per wide character costs a few more draw calls
 // and keeps every column where it belongs.
+// cellStarts appends to buf where in a span's text each of its cells begins,
+// for the renderer, which draws a cell at a time: a cell is a character and
+// the zero-width ones that combine with it, exactly as the screen stored them.
+func cellStarts(text string, buf []int32) []int32 {
+	for i, r := range text {
+		if len(buf) == 0 || textWidth(r) != 0 {
+			buf = append(buf, int32(i))
+		}
+	}
+	return buf
+}
+
 func spans(f Frame) []Span {
 	if f.Rows == 0 || f.Cols == 0 || len(f.Cells) < f.Rows*f.Cols {
 		return nil

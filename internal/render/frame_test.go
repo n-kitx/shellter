@@ -1,6 +1,9 @@
 package render
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func cells(f *Frame, spec string, fg, bg uint32, flags Flags) {
 	for _, r := range spec {
@@ -138,5 +141,26 @@ func TestFade(t *testing.T) {
 	from, to := 255.0, 27.0
 	if want := uint32(from + (to-from)*fadeAmount + 0.5); red != want {
 		t.Fatalf("white faded to %06x: red %02x, want %02x", white, red, want)
+	}
+}
+
+// The renderer draws a span a cell at a time, so it is told where each cell's
+// text starts: a combining mark stays with its character, and a wide
+// character is one cell.
+func TestCellStarts(t *testing.T) {
+	for _, c := range []struct {
+		text string
+		want []int32
+	}{
+		{"abc", []int32{0, 1, 2}},
+		{"café", []int32{0, 1, 2, 3}},
+		{"caféx", []int32{0, 1, 2, 3, 6}},
+		{"中", []int32{0}},
+		{"́", []int32{0}}, // a mark with nothing before it is still a cell
+	} {
+		got := cellStarts(c.text, nil)
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("cellStarts(%q) = %v, want %v", c.text, got, c.want)
+		}
 	}
 }
