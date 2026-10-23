@@ -18,8 +18,28 @@ func readAll(t *testing.T, p *Process) string {
 	return string(out)
 }
 
+// readUntil reads from the master until want has arrived, and returns
+// everything read so far.
+func readUntil(t *testing.T, p *Process, want string) string {
+	t.Helper()
+	var got []byte
+	buf := make([]byte, 1024)
+	for !strings.Contains(string(got), want) {
+		n, err := p.Read(buf)
+		got = append(got, buf[:n]...)
+		if err != nil {
+			t.Fatalf("read: %v, after %q; want %q", err, got, want)
+		}
+	}
+	return string(got)
+}
+
 func TestChildOutputReachesMaster(t *testing.T) {
-	p, err := Start(exec.Command("/bin/echo", "hello"), Size{Rows: 24, Cols: 80})
+	// The child stays alive until its output has been read. macOS can drop
+	// output still queued on a PTY when the child's last descriptor for it
+	// closes, so a child that printed and exited at once could leave nothing
+	// to read if we got there late.
+	p, err := Start(exec.Command("/bin/sh", "-c", "echo hello; read line"), Size{Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,10 +48,11 @@ func TestChildOutputReachesMaster(t *testing.T) {
 	if p.Pid() <= 0 {
 		t.Fatalf("expected a pid, got %d", p.Pid())
 	}
-	got := readAll(t, p)
-	if !strings.Contains(got, "hello") {
-		t.Fatalf("output %q does not contain %q", got, "hello")
+	readUntil(t, p, "hello")
+	if _, err := p.Write([]byte("\n")); err != nil {
+		t.Fatal(err)
 	}
+	readAll(t, p)
 	code, err := p.Wait()
 	if err != nil || code != 0 {
 		t.Fatalf("wait: code=%d err=%v", code, err)

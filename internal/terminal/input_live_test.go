@@ -29,8 +29,10 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 
 	cfg := shell.DefaultConfig()
-	// -f skips the user's startup files so the test does not depend on
-	// whatever is in ~/.zshrc, and PS1 gives us a prompt we can recognise.
+	// zsh whatever the login shell is, since the tests type zsh. -f skips the
+	// startup files so the test does not depend on whatever is in ~/.zshrc,
+	// and PS1 gives us a prompt we can recognise.
+	cfg.Path = "/bin/zsh"
 	cfg.Args = []string{"-f"}
 	cfg.Env = append(cfg.Env, "PS1=PROMPT> ")
 	cfg.Size = pty.Size{Rows: 24, Cols: 80}
