@@ -405,9 +405,13 @@ func TestGitLogPagesAndColours(t *testing.T) {
 	h.press(input.Key{Code: input.CodePageDown})
 	h.waitFor("an older page", func(s string) bool { return hasLine(s, "commit number 1") })
 
+	// The prompt is back on the last line. Whether the log is still on screen
+	// above it depends on LESS: git runs less with -X, which leaves it there,
+	// unless LESS is already set.
 	h.typeText("q")
 	h.waitFor("the shell to come back", func(s string) bool {
-		return strings.Count(s, "PROMPT>") >= 2
+		lines := strings.Split(strings.TrimRight(s, "\n "), "\n")
+		return strings.TrimSpace(lines[len(lines)-1]) == "PROMPT>"
 	})
 }
 
