@@ -5,6 +5,11 @@
 <h1 align="center">Shellter</h1>
 
 <p align="center">
+  <a href="https://github.com/thakurankit7/shellter/actions/workflows/ci.yml"><img src="https://github.com/thakurankit7/shellter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
+<p align="center">
   A fast, native terminal emulator for macOS, drawn on the GPU with Metal.
 </p>
 
@@ -142,3 +147,7 @@ go run ./cmd/shellter -gui          # run without bundling
   the design.
 - [docs/ROADMAP.md](docs/ROADMAP.md) lists what is still missing compared with
   other terminals.
+
+## License
+
+Shellter is released under the [MIT License](LICENSE).

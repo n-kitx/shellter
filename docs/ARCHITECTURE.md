@@ -4,70 +4,35 @@ The design notes behind Shellter, written as it was built: what each part
 does, why it is shaped the way it is, and what was measured along the way.
 The [README](../README.md) is the user's guide; this is the engineer's.
 
-## What works today
+## The pipeline
 
-**Phase 1 — PTY foundation.** Shellter starts `zsh` on a pseudoterminal,
-forwards your keystrokes to it, reads back whatever the shell (and the commands
-it runs) print, and writes those bytes to the terminal Shellter itself is
-running in. When the shell exits, Shellter exits with the same status code.
+Bytes go from the shell to the screen in one direction and from the keyboard
+to the shell in the other, through layers that each do one thing:
 
-**Phase 2 — parser.** Those same bytes are also fed through a state machine
-that turns them into terminal *events*: printable characters, control
-characters, and parsed escape sequences.
+- **PTY** (`pty`, `shell`). Shellter starts the user's shell on a
+  pseudoterminal, in `$HOME`, with the environment a terminal owes it, and
+  tells it the window's size in cells.
+- **Parser** (`parser`). A state machine turns the shell's bytes into events:
+  runs of text, control characters and escape sequences, including strings
+  such as OSC and DCS. It keeps its state between reads, because a sequence
+  can be split across two of them.
+- **Screen** (`screen`). The events drive a grid of cells with a cursor,
+  colours and styles, wide characters and combining marks, scroll regions, an
+  alternate screen, tab stops, modes, and a ring buffer of scrollback. It
+  also answers the questions programs ask, such as where the cursor is.
+- **Renderer** (`render`). An AppKit window, via cgo, draws each pane's grid
+  with Metal: rectangles and cached glyphs as instances, in six draw calls a
+  frame.
+- **Input** (`input`). Key presses, the mouse and pastes become the bytes a
+  terminal sends, in whichever encoding the program asked for.
+- **Application** (`terminal`). Tabs, splits, selection, search, links,
+  settings and session restore. A tab holds a tree of panes, and every pane is
+  its own shell, parser and screen: nothing below this layer knows that tabs
+  or splits exist.
 
-**Phase 3 — screen buffer.** Those events drive a virtual screen held in
-memory: a grid of cells plus a cursor. Printing writes a character and advances
-the cursor; `\n`, `\r`, `\b` and the cursor/erase CSI commands move it and
-clear parts of the grid.
-
-**Phase 4 — renderer.** `shellter -gui` opens a real macOS window (AppKit, via
-cgo) and draws that screen buffer: one monospaced line per row, an inverse-video
-block cursor, repainting whenever the state changes. Resizing the window resizes
-the screen buffer and the PTY together.
-
-**Phase 5 — keyboard input.** Key presses are translated into the bytes a
-terminal sends: characters as UTF-8, Return as CR, Backspace as DEL, Ctrl+key
-by arithmetic, and the arrow keys as escape sequences whose form depends on a
-mode the shell itself switched on. The loop is now closed in both directions.
-
-**Phase 6 — ANSI behaviour.** The screen stopped merely recognising sequences
-and started obeying them: SGR colours and styles are stamped onto every cell,
-the full cursor-movement and erase families work, and terminal modes - cursor
-visibility, autowrap, application cursor keys - are tracked. The renderer draws
-all of it, batching each row into runs of identical appearance.
-
-**Phase 7 — Unicode.** A rune stopped being a column. Wide characters take two
-cells, combining marks take none, and the cursor advances by width rather than
-by character. The parser already decoded UTF-8; now the grid understands it.
-
-**Phase 8 — scrollback.** Lines that scroll off the top are kept in a bounded
-ring buffer instead of being dropped, and the view can move back into them with
-Shift+Page Up or the scroll wheel while the shell keeps writing underneath.
-
-**Phase 9 — compatibility.** Real programs run: `vim`, `less`, `top` and `git`'s
-pager. That took an alternate screen buffer, scroll regions, insert/delete of
-characters and lines, tab stops, the line-drawing character set, mouse
-reporting, function keys, and — the piece that makes terminal emulation
-two-way — answering the questions programs ask. Each of those is tested by
-driving the real program through a real PTY and reading our own screen back.
-
-**Phase 10 — performance and polish.** Profiled first, then fixed what the
-profile actually pointed at: a redraw got 3.6x cheaper and stopped allocating
-entirely, absorbing output got 2.7x faster, and a terminal that has been open
-for a while now runs without allocating at all. See *Performance* below for the
-measurements and what each one bought.
-
-**Phase 11 — tabs and chrome.** One window, several shells. Each tab is its own
-session, parser, screen and scrollback — the pipeline from Phase 1 onwards,
-instantiated more than once rather than changed. The bar can sit **above** the
-terminal or **beside** it, switchable from the View menu, and the grid finally
-got some padding.
-
-**Phase 12 — splits, settings and chrome.** A tab now holds a *tree* of panes:
-`Cmd+D` divides one in two, each half a real shell on its own PTY, told its own
-size. The tabs moved into the title bar, which is hidden so the content view can
-draw that row itself; the window can be translucent and blurred; and everything
-adjustable lives in `~/.config/shellter/config`, with a flag for each setting.
+Every claim about running real programs - vim, less, top, git's pager - is
+tested by driving the real program through a real PTY and reading Shellter's
+own screen back.
 
 ## Why PTY output is a byte stream, not text
 
@@ -148,7 +113,7 @@ key press ──► input.Encode ──► PTY ──► zsh
 mouse     ──► input.EncodeMouse ──┘
 ```
 
-And since Phase 9 there is a third path, because a terminal is asked questions
+And there is a third path, because a terminal is asked questions
 as well as told things:
 
 ```text
@@ -202,7 +167,7 @@ Each layer only knows about the one below it:
   `main`'s business — only how to turn text into values and how to say clearly
   what is wrong with a line.
 * `terminal` is the application layer and has two controllers: `App`
-  (terminal-in-a-terminal, phases 1-3) and `GUI` (window, phases 4 onwards).
+  (terminal-in-a-terminal, for debugging) and `GUI` (the window).
   They share every layer below and differ only at the two ends. The `GUI` owns
   the tabs, each one a tree of panes, and each pane a `shell.Session` with its
   own parser and screen — which is why nothing below this line had to change
@@ -214,7 +179,7 @@ Each layer only knows about the one below it:
 reaches the application:
 
 ```text
-sess.Read -> chunk ─┬─► a.Out            raw passthrough (phase 1 behaviour)
+sess.Read -> chunk ─┬─► a.Out            raw passthrough
                     └─► parser.Parse ──► events ─┬─► App.Screen   terminal state
                                                  └─► App.OnEvent  trace / tests
 ```
@@ -300,7 +265,7 @@ Consequences worth knowing:
 Controls: **Shift+Page Up / Page Down** by a page, **Shift+Home / End** to the
 oldest line and back, and the **scroll wheel** by lines. Without Shift those keys
 are terminal keys and go to the shell as `ESC[5~`, `ESC[6~`, `ESC[H`, `ESC[F`.
-Since Phase 9 those shortcuts step aside while a full-screen program owns the
+Those shortcuts step aside while a full-screen program owns the
 screen: there is no history to scroll there, so Shift+Page Up goes to the
 program and the wheel becomes arrow keys. See *What a wheel turn means*.
 
@@ -312,7 +277,7 @@ go run ./cmd/shellter -gui -scrollback 5000   # default 1000, 0 disables
 
 ## Unicode: a rune is not a column
 
-Decoding UTF-8 was the parser's job back in phase 2. The harder question is
+Decoding UTF-8 is the parser's job. The harder question is
 *width*, and there are three answers:
 
 ```text
@@ -469,7 +434,7 @@ changes underneath it.
 
 ## Performance: measured, then fixed
 
-Every change in Phase 10 came from a measurement, and each one is in the
+Every change below came from a measurement, and each one is in the
 benchmarks (`*_bench_test.go`) so it can be re-run:
 
 ```sh
@@ -578,7 +543,7 @@ that array - three reversals, no allocation - and the text never moves. Every
 access to the grid goes through one small method, `s.row(r)`, which is what
 keeps the indirection from spreading.
 
-### Two contracts this phase introduced
+### Two contracts for speed
 
 **Parser events borrow their slices.** `Event.Params` and `Event.Intermediates`
 point into the parser's own buffers and are valid only until the callback
@@ -605,7 +570,7 @@ until the next one.
 * The shell is waited for even when the window failed to open, so a failure
   cannot leave a shell running on a PTY nobody is reading.
 
-### Keeping it after Phase 12
+### Keeping it with splits
 
 Building a frame went from 19µs to 20.7µs when a frame became a list of panes
 instead of a grid — the cost of the extra indirection, and small enough to
@@ -614,7 +579,7 @@ laying out the pane tree allocated two slices per redraw, which put a frame back
 to 2 allocations.
 
 `tab.layout` now appends into slices the caller hands it, the same
-`SnapshotInto`/`FrameInto` shape used since Phase 10, and the `GUI` keeps the
+`SnapshotInto`/`FrameInto` shape used elsewhere, and the `GUI` keeps the
 ones it got last time. A redraw is back to **0 allocations**, splits and all.
 
 ### What was left alone
@@ -638,8 +603,8 @@ pane ─► shell.Session ─► parser ─► screen.Screen ─┼─► each d
 pane ─► shell.Session ─► parser ─► screen.Screen ─┘
 ```
 
-That is the whole reason these two phases were small: everything from Phase 1 to
-Phase 10 was already a self-contained path from a PTY to a grid, so a second tab
+That is why tabs and splits were small changes: the path from a PTY to a grid
+was already self-contained, so a second tab
 — and later a second pane — is a second instance of it. Nothing in `pty`,
 `shell`, `parser`, `screen`, `input` or `render` knows that tabs exist, and
 nothing below `terminal` knows that splits do.
@@ -701,14 +666,14 @@ descriptor is gone, not an attempt to make the two events ordered.
 
 ### Where the bar goes
 
-Since Phase 12 the tabs live *in* the title bar rather than under it:
+The tabs live *in* the title bar rather than under it:
 
 ```text
        tabs on top                      tabs on the left
 ┌───────────────────────────┐   ┌──────────┬────────────────┐
-│ ●●● (Flux) project vim + │   │ ●●●      Flux             │
+│ ●●● (repo) project vim + │   │ ●●●      repo             │
 ├───────────────────────────┤   ├──────────┼────────────────┤
-│                           │   │ (Flux)   │                │
+│                           │   │ (repo)   │                │
 │        terminal           │   │  project │   terminal     │
 │                           │   │  +       │                │
 └───────────────────────────┘   └──────────┴────────────────┘
@@ -1131,7 +1096,7 @@ and pasting them produce three lines.
 ### The renderer did not change at all
 
 Not one line. A selection is an *appearance* question, and this codebase has
-resolved those in the palette since Phase 6 — inverse, faint, hidden. Selection
+resolved those in the palette — inverse, faint, hidden. Selection
 joins them, applied last so it wins over inverse video: a marked region has to
 be unmistakable even where the program was already painting with the colours
 swapped.
@@ -1154,7 +1119,7 @@ That second rule is a safety measure, not tidiness. An `ESC` in something copied
 off a web page would otherwise be read as an escape sequence by whatever it was
 pasted into — able to move the cursor, change colours, or, in a shell that has
 not asked for bracketed paste, end the line and start running it. Where the
-program *has* asked (`?2004`, tracked since Phase 9 with nothing to bracket),
+program *has* asked (`?2004`),
 the text is wrapped in the markers that let it tell a paste from typing.
 
 ### What is not tested
@@ -1601,7 +1566,7 @@ go run ./cmd/shellter -gui -background-opacity 0.9 # let the desktop through
 are in; the tab bar appears once there is more than one tab to show. Settings
 you want every time go in `~/.config/shellter/config` — see *Settings* above.
 
-Inside the terminal you launched it from (phases 1-3, still works):
+Inside the terminal you launched it from, which is handy for debugging:
 
 ```sh
 go run ./cmd/shellter
@@ -1664,7 +1629,7 @@ Each line is one parser event:
 
 ```text
 CSI     private='?' params=[2004] cmd='h'
-OSC     "0;~/PERSONAL/Flux"
+OSC     "0;~/code/shellter"
 CSI     params=[31] cmd='m'
 PRINT   'R'
 CONTROL LF  (0x0a)
@@ -1685,14 +1650,4 @@ reconstructed purely from events, never from the raw bytes.
 
 Every known gap - next to Terminal.app, iTerm2, Ghostty and the rest - is kept
 in [ROADMAP.md](ROADMAP.md), with where in the code each would go. That file
-is the one list; this README describes what exists.
-
-**Verification.** The GUI has never been looked at by a human in this project:
-every claim about it rests on the headless tests, the live tests against real
-programs, and launch smoke tests. Screen-capture permission was not available
-here, so nothing in this README asserts what the window *looks* like. That
-matters most for the chrome, where hiding the title bar and positioning the tabs
-against the traffic lights is precisely the kind of thing only an eye can
-confirm — and it is how Phase 12 shipped a tab bar that said `shell 1` and a
-strip whose colour did not match the grid under it. Both were found by a person
-looking at a screenshot, and neither could have been found any other way.
+is the one list; this document describes what exists.
