@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thakurankit7/shellter/internal/parser"
+	"github.com/n-kitx/shellter/internal/parser"
 
-	"github.com/thakurankit7/shellter/internal/input"
-	"github.com/thakurankit7/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/input"
+	"github.com/n-kitx/shellter/internal/render"
 )
 
 // Phase 11: the window holds several sessions. These drive the tab list

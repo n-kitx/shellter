@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/thakurankit7/shellter/internal/pty"
+	"github.com/n-kitx/shellter/internal/pty"
 )
 
 // Config describes the shell process to start.

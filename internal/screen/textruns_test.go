@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/thakurankit7/shellter/internal/parser"
+	"github.com/n-kitx/shellter/internal/parser"
 )
 
 // Printing a run of ASCII at once (printASCII, from a parser with TextRuns)

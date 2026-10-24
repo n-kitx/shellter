@@ -21,8 +21,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/thakurankit7/shellter/internal/screen"
-	"github.com/thakurankit7/shellter/internal/theme"
+	"github.com/n-kitx/shellter/internal/screen"
+	"github.com/n-kitx/shellter/internal/theme"
 )
 
 // Config is every setting Shellter understands.

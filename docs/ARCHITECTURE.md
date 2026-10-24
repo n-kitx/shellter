@@ -1603,7 +1603,7 @@ sign with a certificate (a self-signed one from Keychain Access will do):
 
 ```sh
 SHELLTER_SIGN_IDENTITY="Shellter Dev" ./scripts/bundle.sh
-tccutil reset SystemPolicyDownloadsFolder com.thakurankit7.shellter  # forget a refusal
+tccutil reset SystemPolicyDownloadsFolder com.n-kitx.shellter  # forget a refusal
 ```
 
 Launched from the Dock, Shellter inherits launchd's world rather than a

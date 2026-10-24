@@ -3,8 +3,8 @@ package terminal
 import (
 	"testing"
 
-	"github.com/thakurankit7/shellter/internal/input"
-	"github.com/thakurankit7/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/input"
+	"github.com/n-kitx/shellter/internal/render"
 )
 
 func press(row, col, clicks int) render.Mouse {

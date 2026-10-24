@@ -7,7 +7,7 @@
 // contract between that and the rest of Go.
 package render
 
-import "github.com/thakurankit7/shellter/internal/input"
+import "github.com/n-kitx/shellter/internal/input"
 
 // Config is the wiring between the window and the application.
 //

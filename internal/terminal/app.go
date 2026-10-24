@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/thakurankit7/shellter/internal/parser"
-	"github.com/thakurankit7/shellter/internal/pty"
-	"github.com/thakurankit7/shellter/internal/screen"
-	"github.com/thakurankit7/shellter/internal/shell"
+	"github.com/n-kitx/shellter/internal/parser"
+	"github.com/n-kitx/shellter/internal/pty"
+	"github.com/n-kitx/shellter/internal/screen"
+	"github.com/n-kitx/shellter/internal/shell"
 	"golang.org/x/term"
 )
 

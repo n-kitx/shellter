@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thakurankit7/shellter/internal/parser"
+	"github.com/n-kitx/shellter/internal/parser"
 )
 
 // Session restore: what was open when Shellter quit comes back the next time

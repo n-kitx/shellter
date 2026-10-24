@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thakurankit7/shellter/internal/render"
-	"github.com/thakurankit7/shellter/internal/theme"
+	"github.com/n-kitx/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/theme"
 )
 
 // Saving the settings file, or adding or editing a theme file, changes the

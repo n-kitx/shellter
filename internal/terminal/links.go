@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/thakurankit7/shellter/internal/input"
-	"github.com/thakurankit7/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/input"
+	"github.com/n-kitx/shellter/internal/render"
 )
 
 // Cmd+click: opening what the pointer is on, if it is a URL or a file.

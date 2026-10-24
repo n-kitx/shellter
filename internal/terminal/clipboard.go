@@ -5,9 +5,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/thakurankit7/shellter/internal/input"
-	"github.com/thakurankit7/shellter/internal/render"
-	"github.com/thakurankit7/shellter/internal/screen"
+	"github.com/n-kitx/shellter/internal/input"
+	"github.com/n-kitx/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/screen"
 )
 
 // Selecting with the mouse, and the clipboard.

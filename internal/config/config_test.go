@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thakurankit7/shellter/internal/theme"
+	"github.com/n-kitx/shellter/internal/theme"
 )
 
 func parse(t *testing.T, text string) Config {

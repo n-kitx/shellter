@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"unicode"
 
-	"github.com/thakurankit7/shellter/internal/render"
-	"github.com/thakurankit7/shellter/internal/screen"
+	"github.com/n-kitx/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/screen"
 )
 
 // Finding text in a pane: everything it still holds, history and screen.

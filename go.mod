@@ -1,4 +1,4 @@
-module github.com/thakurankit7/shellter
+module github.com/n-kitx/shellter
 
 go 1.25.8
 

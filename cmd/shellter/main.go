@@ -13,10 +13,10 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/thakurankit7/shellter/internal/config"
-	"github.com/thakurankit7/shellter/internal/render"
-	"github.com/thakurankit7/shellter/internal/terminal"
-	"github.com/thakurankit7/shellter/internal/theme"
+	"github.com/n-kitx/shellter/internal/config"
+	"github.com/n-kitx/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/terminal"
+	"github.com/n-kitx/shellter/internal/theme"
 )
 
 func init() {

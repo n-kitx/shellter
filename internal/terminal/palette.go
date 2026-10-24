@@ -1,9 +1,9 @@
 package terminal
 
 import (
-	"github.com/thakurankit7/shellter/internal/render"
-	"github.com/thakurankit7/shellter/internal/screen"
-	"github.com/thakurankit7/shellter/internal/theme"
+	"github.com/n-kitx/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/screen"
+	"github.com/n-kitx/shellter/internal/theme"
 )
 
 // A Palette turns the screen's semantic colours ("colour 1", "the default

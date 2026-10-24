@@ -51,7 +51,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key>              <string>Shellter</string>
     <key>CFBundleDisplayName</key>       <string>Shellter</string>
-    <key>CFBundleIdentifier</key>        <string>com.thakurankit7.shellter</string>
+    <key>CFBundleIdentifier</key>        <string>com.n-kitx.shellter</string>
     <key>CFBundleExecutable</key>        <string>shellter</string>
     <key>CFBundleIconFile</key>          <string>Shellter</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>

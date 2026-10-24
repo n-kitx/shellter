@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thakurankit7/shellter/internal/screen"
+	"github.com/n-kitx/shellter/internal/screen"
 )
 
 // relaunch is one quit and start again for a pane: what it saved comes back

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thakurankit7/shellter/internal/parser"
+	"github.com/n-kitx/shellter/internal/parser"
 )
 
 // Phase 10 baseline. These model the three things a terminal actually spends

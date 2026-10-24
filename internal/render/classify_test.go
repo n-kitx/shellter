@@ -3,7 +3,7 @@ package render
 import (
 	"testing"
 
-	"github.com/thakurankit7/shellter/internal/input"
+	"github.com/n-kitx/shellter/internal/input"
 )
 
 // classify is the whole Go side of keyDown:, and it is pure, so it can be

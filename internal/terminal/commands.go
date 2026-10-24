@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/thakurankit7/shellter/internal/config"
-	"github.com/thakurankit7/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/config"
+	"github.com/n-kitx/shellter/internal/render"
 )
 
 // The menu commands that are not about tabs, splits or the clipboard: clearing

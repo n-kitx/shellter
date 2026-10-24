@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/thakurankit7/shellter/internal/config"
-	"github.com/thakurankit7/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/config"
+	"github.com/n-kitx/shellter/internal/render"
 )
 
 // Settings is everything the settings file decides about a window, in the

@@ -3,8 +3,8 @@ package terminal
 import (
 	"time"
 
-	"github.com/thakurankit7/shellter/internal/render"
-	"github.com/thakurankit7/shellter/internal/screen"
+	"github.com/n-kitx/shellter/internal/render"
+	"github.com/n-kitx/shellter/internal/screen"
 )
 
 // ---------------------------------------------------------------------------

@@ -10,8 +10,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/thakurankit7/shellter/internal/parser"
-	"github.com/thakurankit7/shellter/internal/text"
+	"github.com/n-kitx/shellter/internal/parser"
+	"github.com/n-kitx/shellter/internal/text"
 )
 
 // Cell is one character position on the screen: what is there, and how it

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thakurankit7/shellter/internal/pty"
+	"github.com/n-kitx/shellter/internal/pty"
 )
 
 // A non-interactive one-shot shell: enough to prove the session starts a real
