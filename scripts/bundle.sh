@@ -14,19 +14,69 @@
 # Set SHELLTER_SIGN_IDENTITY to the name of a code-signing certificate in your
 # keychain to sign with it instead of ad hoc; see the signature step below.
 #
+# A release (scripts/release.sh) also sets:
+#
+#   SHELLTER_VERSION=0.1.0   the version, in the app and in what it reports;
+#                            "dev" otherwise
+#   SHELLTER_UNIVERSAL=1     build for Intel as well as Apple Silicon
+#
 set -eu
 
 cd "$(dirname "$0")/.."
 
 APP="build/Shellter.app"
 ART="assets/Shellter.png"
-VERSION="0.1.0"
+VERSION="${SHELLTER_VERSION:-dev}"
+# The plist wants numbers. A dev build is 0.0.0 there and "dev" everywhere else.
+case "$VERSION" in
+    [0-9]*.[0-9]*.[0-9]*) PLIST_VERSION="$VERSION" ;;
+    *) PLIST_VERSION="0.0.0" ;;
+esac
+# Go 1.25 and later run on macOS 12; the Go 1.27 runtime is built for 13.
+MIN_MACOS="13.0"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# cgo and a pinned toolchain: the same incantation the README uses.
-GOTOOLCHAIN=local CGO_ENABLED=1 go build -o "$APP/Contents/MacOS/shellter" ./cmd/shellter
+# cgo and a pinned toolchain: the same incantation the README uses. -trimpath
+# keeps the paths of this machine out of the binary.
+build() { # build GOARCH clang-arch output
+    GOTOOLCHAIN=local CGO_ENABLED=1 GOARCH="$1" CC="clang -arch $2" \
+        CGO_CFLAGS="-mmacosx-version-min=$MIN_MACOS" \
+        CGO_LDFLAGS="-mmacosx-version-min=$MIN_MACOS" \
+        go build -trimpath \
+        -ldflags "-X github.com/n-kitx/shellter/internal/version.Version=$VERSION" \
+        -o "$3" ./cmd/shellter
+}
+BIN="$APP/Contents/MacOS/shellter"
+if [ "${SHELLTER_UNIVERSAL:-}" = 1 ]; then
+    # One binary for both kinds of Mac: each built on its own, then joined.
+    TMP_BIN="$(mktemp -d)"
+    build arm64 arm64 "$TMP_BIN/arm64"
+    build amd64 x86_64 "$TMP_BIN/amd64"
+    lipo -create -output "$BIN" "$TMP_BIN/arm64" "$TMP_BIN/amd64"
+    rm -rf "$TMP_BIN"
+else
+    case "$(uname -m)" in
+        arm64) build arm64 arm64 "$BIN" ;;
+        *) build amd64 x86_64 "$BIN" ;;
+    esac
+fi
+
+# The licences of everything compiled into the binary, which the app has to
+# carry with it: Shellter's own, Go's, and each module's.
+LICENSES="$APP/Contents/Resources/LICENSES.txt"
+GO_ROOT="$(go env GOROOT)"
+{
+    printf 'Shellter\n========\n\n'
+    cat LICENSE
+    printf '\n\nGo (the standard library and runtime)\n=====================================\n\n'
+    cat "$GO_ROOT/LICENSE" 2>/dev/null || cat "$GO_ROOT/../LICENSE"
+    go list -m -f '{{.Path}} {{.Dir}}' all | tail -n +2 | while read -r mod dir; do
+        printf '\n\n%s\n%s\n\n' "$mod" "$(echo "$mod" | sed 's/./=/g')"
+        cat "$dir/LICENSE"
+    done
+} > "$LICENSES"
 
 # The icon. .icns is a container of the same picture at every size the system
 # asks for, from the 16pt one beside a filename to the 512pt one in Finder's
@@ -55,9 +105,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>        <string>shellter</string>
     <key>CFBundleIconFile</key>          <string>Shellter</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key>           <string>$VERSION</string>
-    <key>LSMinimumSystemVersion</key>    <string>12.0</string>
+    <key>CFBundleShortVersionString</key><string>$PLIST_VERSION</string>
+    <key>CFBundleVersion</key>           <string>$PLIST_VERSION</string>
+    <key>LSMinimumSystemVersion</key>    <string>$MIN_MACOS</string>
+    <key>NSHumanReadableCopyright</key>  <string>© 2026 Ankit Thakur. MIT License.</string>
     <key>NSHighResolutionCapable</key>   <true/>
     <key>NSPrincipalClass</key>          <string>NSApplication</string>
 

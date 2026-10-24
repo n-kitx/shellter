@@ -218,10 +218,16 @@ From a review on 2026-10-24: nothing exploitable found, these two to tighten.
 
 - [ ] Developer ID signing and notarisation (the bundle is ad-hoc signed, so
       Gatekeeper warns on any other Mac).
-- [ ] Universal (arm64 + x86_64) build.
+- [x] Universal (arm64 + x86_64) build: `SHELLTER_UNIVERSAL=1 bundle.sh`,
+      which `release.sh` uses. The Intel half has not been run yet - this Mac
+      has no Rosetta.
+- [x] Releases: `scripts/release.sh <version>` tests, builds, packs
+      `Shellter.dmg`, tags and publishes it on GitHub; the version is set once,
+      at build time (`internal/version`). The app carries the licences of
+      everything compiled into it (`Contents/Resources/LICENSES.txt`).
 - [x] Build with a current Go: go.mod asks for go1.25.8, the first with the
       fixes for the five standard library issues govulncheck found reachable
       from go1.22.6 (url.Parse on OSC 7, LookPath behind `open`, three in os).
       Built with go1.27.2, govulncheck (2026-10-12) finds nothing reachable.
 - [ ] Auto-update (Sparkle), crash reporting.
-- [ ] `LICENSE` file.
+- [x] `LICENSE` file (MIT).

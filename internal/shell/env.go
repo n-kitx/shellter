@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/n-kitx/shellter/internal/version"
 )
 
 // environment is the shell's environment: ours, with the variables a terminal
@@ -33,9 +35,9 @@ func environment(base []string, locale func() string) []string {
 	return env
 }
 
-// Version is Shellter's version, as TERM_PROGRAM_VERSION gives it. It is the
-// number XTVERSION reports too (screen.Version); the two change together.
-const Version = "0.1.0"
+// Version is Shellter's version, as TERM_PROGRAM_VERSION gives it. XTVERSION
+// (screen.Version) reports the same number: both come from package version.
+var Version = version.Version
 
 // foreign are variables another terminal sets to say that a shell is running
 // inside it. Started from iTerm - which is how Shellter runs under `go run` -

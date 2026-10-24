@@ -4,10 +4,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"strings"
+
+	"github.com/n-kitx/shellter/internal/version"
 )
 
 // Version is what Shellter says it is when a program asks (XTVERSION).
-const Version = "Shellter 0.1.0"
+var Version = "Shellter " + version.Version
 
 // dcs handles a Device Control String. Two are questions worth answering:
 //

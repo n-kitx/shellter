@@ -45,29 +45,33 @@ every frame is drawn in six instanced Metal draw calls.
   dropping files to paste their paths; Secure Keyboard Entry; and a warning
   before pasting several lines or closing a running program.
 
-## Requirements
-
-- macOS 12 Monterey or later, on Apple Silicon
-- To build: Go 1.25.8 or later and the Xcode Command Line Tools
-  (`xcode-select --install`)
-
 ## Install
 
-Build the app from source:
+**[Download Shellter for macOS](https://github.com/n-kitx/shellter/releases/latest/download/Shellter.dmg)**
+(macOS 13 Ventura or later, Apple Silicon and Intel)
+
+Open the disk image and drag Shellter onto Applications.
+
+Shellter is not yet signed with an Apple Developer ID, so the first time you
+open it macOS will say it cannot be opened. Open
+**System Settings → Privacy & Security** and click **Open Anyway**, or run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Shellter.app
+```
+
+You only need to do this once.
+
+### Build from source
+
+You need Go 1.25.8 or later and the Xcode Command Line Tools
+(`xcode-select --install`).
 
 ```sh
 git clone https://github.com/n-kitx/shellter.git
 cd shellter
 ./scripts/bundle.sh                 # builds build/Shellter.app
 cp -R build/Shellter.app /Applications/
-```
-
-The app is not yet signed with an Apple Developer ID. If you received a
-copy from someone else and macOS refuses to open it, open
-**System Settings → Privacy & Security** and click **Open Anyway**, or run:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Shellter.app
 ```
 
 ## Keyboard shortcuts
@@ -140,7 +144,11 @@ you can run them with `go test -bench . ./internal/...`.
 ```sh
 go test ./...                       # the test suite
 go run ./cmd/shellter -gui          # run without bundling
+./scripts/release.sh 0.2.0 --dry-run  # build the release disk image
 ```
+
+`./scripts/release.sh <version>` tests, builds a universal app, packs
+`Shellter.dmg`, tags the version and publishes it as a GitHub release.
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how Shellter works:
   the parser, the screen, the Metal renderer, and every measurement behind
