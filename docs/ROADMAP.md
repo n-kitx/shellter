@@ -201,6 +201,19 @@ rather than rediscovering the state by reading the code.
       grid, a transcript replays). The first run found a reflow crash on a
       wide character at one column; crashers stay in `testdata/fuzz`.
 
+## Security
+
+From a review on 2026-10-24: nothing exploitable found, these two to tighten.
+
+- [ ] Cmd+click: add `.fileloc`, `.webloc`, `.inetloc` (shortcuts that can
+      point at an app or another kind of link), `.prefPane` and
+      `.mobileconfig` (they start an install) to `runnable` in
+      `internal/terminal/links.go`, so they are shown in the Finder rather
+      than opened. Needs such a file on disk and a Cmd+click on its path.
+- [ ] Update `golang.org/x/sys` (v0.20.0) and `golang.org/x/term` (v0.20.0).
+      govulncheck flags x/sys for a Windows-only issue Shellter cannot reach,
+      but scanners and readers will see the old versions.
+
 ## Distribution
 
 - [ ] Developer ID signing and notarisation (the bundle is ad-hoc signed, so
