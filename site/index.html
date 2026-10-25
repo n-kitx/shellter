@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shellter — a fast terminal for macOS</title>
+  <meta name="description" content="Shellter is a fast, native terminal emulator for macOS, drawn on the GPU with Metal.">
+  <meta property="og:title" content="Shellter — a fast terminal for macOS">
+  <meta property="og:description" content="A fast, native terminal emulator for macOS, drawn on the GPU with Metal. Free and open source.">
+  <meta property="og:image" content="https://n-kitx.github.io/shellter/icon.png">
+  <meta property="og:url" content="https://n-kitx.github.io/shellter/">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <style>
+    :root {
+      --bg: #1d2021; --panel: #232627; --line: #3a3d3e;
+      --fg: #ebdbb2; --muted: #a89984; --dim: #7c6f64;
+      --green: #3ee08f; --yellow: #fabd2f; --blue: #83a598; --red: #fb4934; --aqua: #8ec07c;
+      --mono: Monaco, "SF Mono", ui-monospace, Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.7 var(--mono); -webkit-font-smoothing: antialiased; }
+    a { color: var(--green); }
+    .page { max-width: 880px; margin: 0 auto; padding: 32px 24px 64px; }
+    .prompt { color: var(--green); }
+    .cmd { color: var(--fg); }
+    .out { color: var(--muted); }
+    .hl { color: var(--yellow); }
+    .blk { margin: 0 0 56px; }
+    .blk h2 { font: inherit; margin: 0 0 14px; }
+    .top { display: flex; justify-content: space-between; align-items: center; color: var(--dim); font-size: 13px; margin-bottom: 56px; }
+    .top a { color: var(--dim); text-decoration: none; margin-left: 20px; }
+    .top a:hover { color: var(--fg); }
+    .logo { display: flex; align-items: center; gap: 10px; color: var(--fg); }
+    .logo img { width: 22px; height: 22px; }
+    pre.art { color: var(--green); font: 11px/1 Menlo, "SF Mono", monospace; letter-spacing: 0; margin: 0 0 18px; white-space: pre; overflow: hidden; }
+    .big { font-size: clamp(22px, 3.6vw, 30px); line-height: 1.35; color: var(--fg); margin: 6px 0 8px; }
+    .btns { display: flex; flex-wrap: wrap; gap: 14px; margin: 26px 0 10px; }
+    .btn { font: inherit; text-decoration: none; padding: 10px 16px; border: 1px solid var(--green); color: var(--green); }
+    .btn:hover { background: rgba(62, 224, 143, 0.08); }
+    .btn.solid { background: var(--green); color: #102016; }
+    .btn.solid:hover { background: #5ff0a5; }
+    .btn.ghost { border-color: var(--line); color: var(--fg); }
+    .shot { margin: 40px 0 72px; }
+    dl { display: grid; grid-template-columns: 230px 1fr; gap: 6px 24px; margin: 0; }
+    dt { color: var(--yellow); }
+    dd { margin: 0; color: var(--muted); }
+    table { border-collapse: collapse; width: 100%; }
+    td { padding: 6px 0; border-bottom: 1px dashed var(--line); vertical-align: top; }
+    td:first-child { color: var(--muted); width: 60%; }
+    td:last-child { color: var(--green); text-align: right; }
+    ol { margin: 0; padding-left: 0; list-style: none; counter-reset: s; }
+    ol li { counter-increment: s; margin-bottom: 8px; color: var(--muted); }
+    ol li::before { content: "[" counter(s) "] "; color: var(--yellow); }
+    code { background: var(--panel); border: 1px solid var(--line); padding: 2px 6px; color: var(--fg); font: 13px var(--mono); }
+    pre.cfg { margin: 0; padding: 16px 18px; background: var(--panel); border: 1px solid var(--line); font: 13.5px/1.7 var(--mono); color: var(--fg); overflow-x: auto; }
+    footer { border-top: 1px dashed var(--line); padding-top: 20px; color: var(--dim); font-size: 13px; }
+    footer a { color: var(--dim); }
+    @media (max-width: 640px) {
+      body { font-size: 13px; }
+      dl { grid-template-columns: 1fr; }
+      dt { margin-top: 10px; }
+      pre.art { font-size: 6.5px; }
+      .panes { grid-template-columns: 1fr !important; }
+      .pane + .pane { display: none; }
+      .apptitle, .tab:not(.on) { display: none; }
+      .lights { margin-right: 14px; }
+      .pane { font-size: 10.5px !important; line-height: 15px !important; min-height: 0 !important; }
+    }
+    /* Terminal mock-up: Shellter as it draws itself, in the gruvbox-dark theme.
+       The chrome is the terminal's own background, and its shades are the
+       ones the app derives from it: the active tab 16% towards white, text
+       92%, dim text 55%, the hairline 18%. */
+    .window {
+      --t-bg: #282828; --t-fg: #ebdbb2;
+      --t-pill: #4a4a4a; --t-text: #eeeeee; --t-dim: #9e9e9e; --t-edge: #4f4f4f;
+      --t-divider: rgba(122, 130, 148, 0.55);
+      background: var(--t-bg); border: 1px solid #3a3a3a; border-radius: 12px; overflow: hidden; max-width: 100%;
+      box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.7);
+    }
+    .titlebar { display: flex; align-items: center; height: 40px; padding: 0 5px 0 14px; border-bottom: 1px solid var(--t-edge); font: 13px var(--sans); }
+    .lights { display: flex; gap: 8px; flex: none; }
+    .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+    .lights i:nth-child(1) { background: #ff5f57; }
+    .lights i:nth-child(2) { background: #febc2e; }
+    .lights i:nth-child(3) { background: #28c840; }
+    .apptitle { margin: 0 24px 0 28px; color: var(--t-text); white-space: nowrap; flex: none; }
+    .glyph { font: 600 12px var(--mono); letter-spacing: -1px; margin-right: 7px; }
+    .tabs { display: flex; gap: 4px; flex: 1; min-width: 0; height: 30px; }
+    .tab { display: flex; align-items: center; width: 220px; min-width: 0; padding: 0 10px; border-radius: 7px; color: var(--t-dim); white-space: nowrap; }
+    .tab .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .tab.on { background: var(--t-pill); color: var(--t-text); }
+    .tab .x { margin-left: 8px; font-size: 15px; line-height: 1; }
+    .newtab { width: 30px; display: grid; place-items: center; color: var(--t-dim); font-size: 20px; font-weight: 300; flex: none; }
+    .panes { display: grid; grid-template-columns: 1.3fr 0.7fr; }
+    .pane {
+      min-width: 0; padding: 12px; min-height: 300px; overflow: hidden; white-space: pre;
+      font: 11px/16px Monaco, Menlo, ui-monospace, monospace; color: var(--t-fg);
+    }
+    .pane + .pane { border-left: 1px solid var(--t-divider); }
+    .k { color: #b8bb26; }            /* the prompt's arrow */
+    .c { color: #8ec07c; }            /* the directory */
+    .gb { color: #83a598; }           /* git:( ) */
+    .gr { color: #fb4934; }           /* the branch */
+    .y { color: #d79921; }            /* commit hashes */
+    .hd { color: #8ec07c; }           /* HEAD */
+    .br { color: #b8bb26; }           /* a branch name */
+    .tg { color: #fabd2f; }           /* a tag */
+    .d { color: #928374; }
+    .bold { font-weight: 400; } /* Monaco has no bold face, and Shellter does not fake one */
+    .dir { color: #458588; }          /* ls -G: directories */
+    .vg { color: #b8bb26; }           /* vite */
+    .vv { color: #98971a; }
+    .vu { color: #8ec07c; }
+    .vu b { font-weight: inherit; }
+    .cursor { display: inline-block; width: 7px; height: 15px; background: var(--t-fg); vertical-align: -3px; }
+
+
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="top">
+      <span class="logo"><img src="icon.png" alt="">shellter</span>
+      <span><a href="#features">features</a><a href="#install">install</a><a href="https://github.com/n-kitx/shellter">github</a></span>
+    </div>
+
+    <div class="blk">
+<pre class="art" aria-label="Shellter">
+ ███████╗██╗  ██╗███████╗██╗     ██╗  ████████╗███████╗██████╗
+ ██╔════╝██║  ██║██╔════╝██║     ██║  ╚══██╔══╝██╔════╝██╔══██╗
+ ███████╗███████║█████╗  ██║     ██║     ██║   █████╗  ██████╔╝
+ ╚════██║██╔══██║██╔══╝  ██║     ██║     ██║   ██╔══╝  ██╔══██╗
+ ███████║██║  ██║███████╗███████╗███████╗██║   ███████╗██║  ██║
+ ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚══════╝╚═╝  ╚═╝</pre>
+      <div class="out"># Shellter <span class="version-num">0.1.0</span> · macOS 13+ · Apple Silicon and Intel · MIT License</div>
+      <p class="big">A fast terminal for macOS, drawn on the GPU with Metal.</p>
+      <div class="btns">
+        <a class="btn solid" href="https://github.com/n-kitx/shellter/releases/latest/download/Shellter.dmg">↓ download Shellter.dmg</a>
+        <a class="btn ghost" href="https://github.com/n-kitx/shellter">view source on github</a>
+      </div>
+    </div>
+
+    <div class="shot">
+        <div class="window">
+          <div class="titlebar">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="apptitle"><span class="glyph">&gt;_</span>Shellter</div>
+            <div class="tabs">
+              <div class="tab on"><span class="glyph">&gt;_</span><span class="name">~/code/shellter</span><span class="x">×</span></div>
+              <div class="tab"><span class="glyph">&gt;_</span><span class="name">vim README.md</span></div>
+              <div class="newtab">+</div>
+            </div>
+          </div>
+          <div class="panes">
+<div class="pane"><span class="k bold">➜</span>  <span class="c bold">Shellter</span> <span class="gb bold">git:(</span><span class="gr bold">main</span><span class="gb bold">)</span> <span class="y">✗</span> ls
+<span class="dir">assets</span>          go.mod          README.md
+<span class="dir">build</span>           go.sum          <span class="dir">scripts</span>
+<span class="dir">cmd</span>             <span class="dir">internal</span>        <span class="dir">site</span>
+<span class="dir">docs</span>            LICENSE
+<span class="k bold">➜</span>  <span class="c bold">Shellter</span> <span class="gb bold">git:(</span><span class="gr bold">main</span><span class="gb bold">)</span> <span class="y">✗</span> go test ./...
+?       github.com/n-kitx/shellter/cmd/shellter [no test files]
+ok      github.com/n-kitx/shellter/internal/config      0.404s
+ok      github.com/n-kitx/shellter/internal/input       0.442s
+ok      github.com/n-kitx/shellter/internal/parser      0.213s
+ok      github.com/n-kitx/shellter/internal/pty 1.049s
+ok      github.com/n-kitx/shellter/internal/render      0.159s
+ok      github.com/n-kitx/shellter/internal/screen      0.221s
+ok      github.com/n-kitx/shellter/internal/shell       0.801s
+ok      github.com/n-kitx/shellter/internal/terminal    13.296s
+ok      github.com/n-kitx/shellter/internal/text        0.412s
+ok      github.com/n-kitx/shellter/internal/theme       0.151s
+?       github.com/n-kitx/shellter/internal/version     [no test files]
+<span class="k bold">➜</span>  <span class="c bold">Shellter</span> <span class="gb bold">git:(</span><span class="gr bold">main</span><span class="gb bold">)</span> <span class="y">✗</span> <span class="cursor"></span></div>
+<div class="pane"><span class="k bold">➜</span>  <span class="c bold">web</span> <span class="gb bold">git:(</span><span class="gr bold">main</span><span class="gb bold">)</span> npm run dev
+
+&gt; web@0.0.0 dev
+&gt; vite
+
+
+  <span class="vg">VITE</span> <span class="vv">v5.4.2</span>  <span class="d">ready in</span> 312 ms
+
+  <span class="vv">➜</span>  Local:   <span class="vu">http://localhost:<b>5173</b>/</span>
+  <span class="d">➜  Network: use --host to expose</span>
+  <span class="d">➜  press h + enter to show help</span></div>
+          </div>
+        </div>
+
+    </div>
+
+    <div class="blk" id="features">
+      <h2><span class="out"># what you get</span></h2>
+      <dl>
+        <dt>fast</dt><dd>About 170 MB/s of output through a real shell, at 120 fps, drawn with Metal in six draw calls a frame.</dd>
+        <dt>tabs and splits</dt><dd>Split any pane right or down, move between panes and swap them, zoom one to fill the tab, drag tabs to reorder.</dd>
+        <dt>session restore</dt><dd>Quit and reopen to get your tabs, splits, folders and recent scrollback back.</dd>
+        <dt>themes</dt><dd>Ten built in, or your own file; one for light mode and one for dark, switched as macOS switches.</dd>
+        <dt>live settings</dt><dd>One plain-text file, applied the moment you save it.</dd>
+        <dt>modern output</dt><dd>24-bit colour, curly, dotted and dashed underlines, mouse reporting, wide characters and emoji.</dd>
+        <dt>search and links</dt><dd>Find with every match highlighted; Cmd-click a URL or a path to open it.</dd>
+        <dt>careful</dt><dd>Programs can't read your clipboard, and pasted text can't smuggle in control characters.</dd>
+        <dt>a Mac app</dt><dd>Translucent, blurred backgrounds, full screen, dropped files typed as paths, Secure Keyboard Entry.</dd>
+      </dl>
+    </div>
+
+    <div class="blk">
+      <h2><span class="prompt">❯</span> cat ~/.config/shellter/config <span class="out"># Cmd+, opens it</span></h2>
+<pre class="cfg"><span class="out"># Shellter settings: "key = value", one per line.
+# Changes apply as soon as the file is saved.</span>
+<span class="hl">theme</span> = light:github-light,dark:gruvbox-dark
+<span class="hl">font-family</span> = Monaco
+<span class="hl">font-size</span> = 14
+<span class="hl">cursor-style</span> = block
+<span class="hl">tab-position</span> = top
+<span class="hl">background-opacity</span> = 0.92
+<span class="hl">background-blur</span> = true
+<span class="hl">copy-on-select</span> = true
+<span class="hl">option-as-meta</span> = true
+<span class="hl">restore-session</span> = true</pre>
+      <p class="out" style="margin: 14px 0 0;"># The first time, Shellter writes this file with every setting listed and explained.</p>
+    </div>
+
+    <div class="blk">
+      <h2><span class="out"># keyboard</span></h2>
+      <table>
+        <tr><td>new tab · close pane · close tab</td><td>⌘T · ⌘W · ⇧⌘W</td></tr>
+        <tr><td>split right · split down</td><td>⌘D · ⇧⌘D</td></tr>
+        <tr><td>move between panes · swap panes</td><td>⌥⌘ arrows · ⇧⌥⌘ arrows</td></tr>
+        <tr><td>zoom a pane</td><td>⇧⌘↩</td></tr>
+        <tr><td>find · next · previous</td><td>⌘F · ⌘G · ⇧⌘G</td></tr>
+        <tr><td>clear screen and history</td><td>⌘K</td></tr>
+        <tr><td>bigger · smaller · reset text</td><td>⌘= · ⌘- · ⌘0</td></tr>
+        <tr><td>settings</td><td>⌘,</td></tr>
+      </table>
+    </div>
+
+    <div class="blk">
+      <h2><span class="out"># performance, measured on an Apple M1 Pro</span></h2>
+      <table>
+        <tr><td>output through a real shell (cat, 53 MB)</td><td>170 MB/s</td></tr>
+        <tr><td>frame rate while output streams</td><td>120 fps</td></tr>
+        <tr><td>main thread under load</td><td>~10% of a core</td></tr>
+        <tr><td>CPU when idle</td><td>&lt; 1%</td></tr>
+        <tr><td>allocations while parsing output</td><td>0</td></tr>
+      </table>
+      <p class="out" style="margin: 14px 0 0;"># the benchmarks ship with the source: go test -bench . ./internal/...</p>
+    </div>
+
+    <div class="blk" id="install">
+      <h2><span class="out"># install</span></h2>
+      <ol>
+        <li><a href="https://github.com/n-kitx/shellter/releases/latest/download/Shellter.dmg">Download Shellter.dmg</a> and open it.</li>
+        <li>Drag Shellter onto Applications.</li>
+        <li>The first time, macOS blocks it because it isn't signed by Apple yet: click <b>Open Anyway</b> in System Settings → Privacy &amp; Security, or run <code>xattr -dr com.apple.quarantine /Applications/Shellter.app</code></li>
+      </ol>
+    </div>
+
+    <footer>
+      MIT License · <a href="https://github.com/n-kitx/shellter">github.com/n-kitx/shellter</a> · <a href="https://github.com/n-kitx/shellter/issues">report a bug</a>
+    </footer>
+  </div>
+  <script>
+    // The download link always gives the newest release; this only updates
+    // the version shown. Without an answer from GitHub, the page keeps its own.
+    fetch("https://api.github.com/repos/n-kitx/shellter/releases/latest")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (rel) {
+        if (!rel || !rel.tag_name) return;
+        var v = rel.tag_name.replace(/^v/, "");
+        document.querySelectorAll(".version-num").forEach(function (el) { el.textContent = v; });
+      })
+      .catch(function () {});
+  </script>
+</body>
+</html>

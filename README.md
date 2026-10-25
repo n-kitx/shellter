@@ -13,6 +13,12 @@
   A fast, native terminal emulator for macOS, drawn on the GPU with Metal.
 </p>
 
+<p align="center">
+  <a href="https://n-kitx.github.io/shellter/">Website</a> ·
+  <a href="https://github.com/n-kitx/shellter/releases/latest/download/Shellter.dmg">Download</a> ·
+  <a href="docs/ARCHITECTURE.md">How it works</a>
+</p>
+
 ---
 
 Shellter is a macOS terminal written in Go and Objective-C. It is built for
