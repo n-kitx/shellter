@@ -63,14 +63,27 @@ SHELLTER_VERSION="$VERSION" SHELLTER_UNIVERSAL=1 ./scripts/bundle.sh
 
 # The disk image: the app beside a link to /Applications, so installing is
 # one drag.
+#
+# The disk it opens as wears Shellter's icon: .VolumeIcon.icns at its root,
+# and the root marked as having a custom icon. That flag can only be set on a
+# mounted, writable image, so the image is made writable first and compressed
+# after. (The .dmg file's own icon cannot be given: a browser drops it on
+# download.)
 echo "== packing $DMG"
 STAGE="$(mktemp -d)"
 cp -R build/Shellter.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-rm -f "$DMG"
+cp build/Shellter.app/Contents/Resources/Shellter.icns "$STAGE/.VolumeIcon.icns"
+RW="$(mktemp -d)/Shellter-rw.dmg"
 hdiutil create -quiet -volname "Shellter $VERSION" -srcfolder "$STAGE" \
-    -fs HFS+ -format UDZO -ov "$DMG"
+    -fs HFS+ -format UDRW -ov "$RW"
 rm -rf "$STAGE"
+MOUNT="$(hdiutil attach -nobrowse -noautoopen "$RW" | tail -1 | cut -f3)"
+SetFile -a C "$MOUNT"
+hdiutil detach -quiet "$MOUNT"
+rm -f "$DMG"
+hdiutil convert -quiet "$RW" -format UDZO -o "$DMG"
+rm -rf "$(dirname "$RW")"
 SHA256="$(shasum -a 256 "$DMG" | cut -d' ' -f1)"
 echo "$DMG  $(du -h "$DMG" | cut -f1)  sha256 $SHA256"
 

@@ -12,3 +12,6 @@
 
 # macOS.
 .DS_Store
+
+# A release disk image copied into the site to try a download locally.
+/site/**/*.dmg
