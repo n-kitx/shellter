@@ -171,6 +171,56 @@ func TestSaveAndRestoreCursor(t *testing.T) {
 	}
 }
 
+// Keyboard-protocol sequences share final bytes with SGR and cursor
+// save/restore, told apart only by their private marker. Claude Code sends
+// modifyOtherKeys and the kitty push/pop on start; read as SGR 4;2 the first
+// underlined and dimmed every line after it.
+func TestPrivateMarkedSGRAndCursorSequencesAreNotObeyed(t *testing.T) {
+	s := New(5, 20)
+	feed(s, "\x1b[>4;2m\x1b[>1u\x1b[?u\x1b[<uA")
+	if a := s.Cell(0, 0).Attr; a != (Attr{}) {
+		t.Fatalf("attr = %+v, want the default pen", a)
+	}
+
+	feed(s, "\x1b[3;5H\x1b[s\x1b[1;1H\x1b[>1u\x1b[<u")
+	assertCursor(t, s, 0, 0)
+	feed(s, "\x1b[u")
+	assertCursor(t, s, 2, 4)
+}
+
+// The same holds for every command: a sequence Shellter does not support is
+// ignored, never run as the plain command it shares a final byte with.
+func TestUnsupportedMarkedSequencesAreIgnored(t *testing.T) {
+	s := New(5, 20)
+	feed(s, "abcdef\x1b[1;3H")
+	for _, seq := range []string{
+		"\x1b[2 @",  // SL, scroll left: not ICH
+		"\x1b[2 A",  // SR, scroll right: not CUU
+		"\x1b[?2D",  // not CUB
+		"\x1b[>4h",  // not IRM, insert mode
+		"\x1b[>20h", // not LNM
+		"\x1b[=1u",  // kitty keyboard set flags
+		"\x1b[?5W",  // DECST8C
+		"\x1b[>1s",  // not save cursor
+		"\x1b[!p",   // DECSTR, not supported
+		"\x1b[?1r",  // XTRESTORE, not a scroll region
+		"\x1b[>1t",  // XTSMTITLE, not a window op
+	} {
+		feed(s, seq)
+		assertCursor(t, s, 0, 2)
+		if got := s.Line(0); got != "abcdef" {
+			t.Fatalf("after %q the line is %q, want it unchanged", seq, got)
+		}
+	}
+	if s.mode.Insert || s.mode.NewLine {
+		t.Fatalf("modes changed: %+v", s.mode)
+	}
+	feed(s, "X")
+	if got := s.Line(0); got != "abXdef" {
+		t.Fatalf("line = %q, want the X overwritten in place", got)
+	}
+}
+
 func TestReverseIndexScrollsAtTheTop(t *testing.T) {
 	s := New(3, 6)
 	feed(s, "one\r\ntwo\r\nthree")

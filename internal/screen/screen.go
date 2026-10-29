@@ -760,6 +760,28 @@ func (s *Screen) control(b byte) {
 }
 
 func (s *Screen) csi(e parser.Event) {
+	// A marker or intermediate byte makes a different sequence that only
+	// shares the final byte: "ESC [ > 4 ; 2 m" is a keyboard mode, not SGR,
+	// and "ESC [ 2 SP @" scrolls left rather than inserting. Only the commands
+	// below read those bytes; for the rest such a sequence is one Shellter
+	// does not support, and is ignored.
+	if e.Private != 0 || len(e.Intermediates) > 0 {
+		switch e.Command {
+		case 'h', 'l': // DECSET / DECRST
+			if e.Private != '?' || len(e.Intermediates) > 0 {
+				return
+			}
+		case 'J', 'K': // DECSED / DECSEL, erased as ED / EL
+			if len(e.Intermediates) > 0 {
+				return
+			}
+		case 'q', 'p', 'c', 'n':
+			// They check their own.
+		default:
+			return
+		}
+	}
+
 	// Anything that moves or erases cancels a pending wrap; SGR and mode
 	// changes do not, because they do not touch the cursor.
 	switch e.Command {
@@ -818,13 +840,9 @@ func (s *Screen) csi(e parser.Event) {
 	case 'M': // DL - delete lines, pulling the region up
 		s.deleteLines(e.Param(0, 1))
 	case 'S': // SU - scroll the region up
-		if e.Private == 0 {
-			s.shiftUp(s.top, s.bottom, e.Param(0, 1), s.archives())
-		}
+		s.shiftUp(s.top, s.bottom, e.Param(0, 1), s.archives())
 	case 'T': // SD - scroll the region down
-		if e.Private == 0 {
-			s.shiftDown(s.top, s.bottom, e.Param(0, 1))
-		}
+		s.shiftDown(s.top, s.bottom, e.Param(0, 1))
 
 	// --- tab stops ---
 	case 'I': // CHT - forward n tab stops
@@ -836,9 +854,7 @@ func (s *Screen) csi(e parser.Event) {
 
 	// --- the scroll region ---
 	case 'r': // DECSTBM - set top and bottom margins
-		if e.Private == 0 {
-			s.setScrollRegion(e.Param(0, 1), e.Param(1, s.rows))
-		}
+		s.setScrollRegion(e.Param(0, 1), e.Param(1, s.rows))
 
 	// --- modes and saved state ---
 	case 'h', 'l': // SM / RM, private forms DECSET / DECRST
@@ -870,9 +886,7 @@ func (s *Screen) csi(e parser.Event) {
 	case 'n': // DSR - device status, including the cursor position
 		s.deviceStatus(csiQuery{private: e.Private, param: e.Param(0, 0)})
 	case 't': // window operations: size reports and the title stack
-		if e.Private == 0 {
-			s.windowOp(csiQuery{param: e.Param(0, 0)})
-		}
+		s.windowOp(csiQuery{param: e.Param(0, 0)})
 	}
 }
 
@@ -895,7 +909,10 @@ func (s *Screen) repeatLast(n int) {
 // intermediate byte, when there is one, says which family it belongs to:
 // "ESC ( 0" designates a character set, "ESC # 8" is a test pattern.
 func (s *Screen) escape(e parser.Event) {
-	if len(e.Intermediates) == 1 {
+	if len(e.Intermediates) > 0 {
+		if len(e.Intermediates) > 1 {
+			return
+		}
 		switch e.Intermediates[0] {
 		case '(', ')':
 			s.charsets.designate(e.Intermediates[0], e.Command)
