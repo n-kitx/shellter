@@ -318,7 +318,8 @@ func (p *pane) close() {
 //
 // A shell's title is a path, and a path is too long for a tab, so it is trimmed
 // to its last component - "Flux" rather than "/Users/me/PERSONAL/Flux". The bar
-// truncates from the head as well, so what survives is always the end.
+// truncates a path from the head as well, so what survives is always the end,
+// and anything else from the tail, so it reads from its start.
 //
 // fallback is used until the shell has said anything, which is the second or
 // two it spends reading its startup files: zsh does not send a title until it

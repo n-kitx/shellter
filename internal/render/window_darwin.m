@@ -1166,14 +1166,16 @@ static double drawBell(NSRect box, NSColor *color) {
     return size.width;
 }
 
-// drawLabel centres one line of text vertically in a rect, truncating the
-// front: a tab is usually a path, and the end of a path is the useful half.
-static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, BOOL centred) {
+// drawLabel centres one line of text vertically in a rect, truncating it where
+// cut says: the front of a path, whose end is the useful half, and the back of
+// prose, which reads from the start.
+static void drawLabel(NSString *text, NSRect box, NSColor *color, double size, BOOL centred,
+                      NSLineBreakMode cut) {
     if (box.size.width < 8) {
         return;
     }
     NSMutableParagraphStyle *style = [[[NSMutableParagraphStyle alloc] init] autorelease];
-    [style setLineBreakMode:NSLineBreakByTruncatingHead];
+    [style setLineBreakMode:cut];
     [style setAlignment:centred ? NSTextAlignmentCenter : NSTextAlignmentLeft];
     NSFont *font = [NSFont systemFontOfSize:size weight:NSFontWeightMedium];
     NSDictionary *attrs = @{
@@ -1246,12 +1248,38 @@ static void titlebarDoubleClicked(NSWindow *window) {
 @end
 
 @interface ShellterTabBar : NSView
+- (void)syncToolTips;
 @end
 
 @implementation ShellterTabBar
 
 - (BOOL)isFlipped {
     return YES;
+}
+
+// syncToolTips gives each tab a tooltip with its whole title, for when the bar
+// has had to cut it short. The rects are where the tabs rest, so they need
+// redoing only when the tabs are added, removed or moved, or the bar resized;
+// the text is asked for when the tooltip shows, so a retitle needs nothing.
+- (void)syncToolTips {
+    [self removeAllToolTips];
+    NSSize size = [self bounds].size;
+    for (int i = 0; i < tabCount(); i++) {
+        [self addToolTipRect:tabRect(i, size) owner:self userData:(void *)(intptr_t)i];
+    }
+}
+
+- (NSString *)view:(NSView *)view
+    stringForToolTip:(NSToolTipTag)tag
+               point:(NSPoint)point
+            userData:(void *)data {
+    int i = (int)(intptr_t)data;
+    return (gDragTab < 0 && i < tabCount()) ? gTabTitles[i] : nil;
+}
+
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
+    [self syncToolTips];
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
@@ -1326,7 +1354,8 @@ static void titlebarDoubleClicked(NSWindow *window) {
     BOOL closable = !lifted && (active || i == gHoverTab);
     NSRect label = NSMakeRect(textLeft, r.origin.y,
                               NSMaxX(r) - textLeft - (closable ? 26 : 11), r.size.height);
-    drawLabel(gTabTitles[i], label, active ? chromeText() : chromeDim(), 12, NO);
+    drawLabel(gTabTitles[i], label, active ? chromeText() : chromeDim(), 12, NO,
+              tabIsDir(i) ? NSLineBreakByTruncatingHead : NSLineBreakByTruncatingTail);
     if (closable) {
         NSRect cross = closeRect(r);
         BOOL hot = (i == gHoverTab && gHoverClose);
@@ -1753,7 +1782,7 @@ static void closeFind(void) {
     // lights, so it carries the title. With them on top they are the title.
     if (gTabPosition == 1) {
         NSRect strip = NSMakeRect(gLeadInset, 0, b.size.width - 2 * gLeadInset, gStripHeight);
-        drawLabel(gTitle, strip, chromeDim(), 12.5, YES);
+        drawLabel(gTitle, strip, chromeDim(), 12.5, YES, NSLineBreakByTruncatingHead);
     }
 
     // A hairline under the strip, the full width of the window, so the title
@@ -2654,6 +2683,7 @@ void shellterSetTabs(const char *titles, int len, const char *busy,
           }
 
           syncTabPositionMenu();
+          [(ShellterTabBar *)gTabBar syncToolTips];
           // Appearing, disappearing or moving all change how much room the grid
           // has, which re-reports the size to Go through setFrameSize:.
           if (wasVisible != tabBarVisible() || wasPosition != gTabPosition) {
