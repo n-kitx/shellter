@@ -41,7 +41,7 @@ func TestModifiedKeys(t *testing.T) {
 		want string
 	}{
 		{"shift+up", Key{Code: CodeUp, Mods: ModShift}, "\x1b[1;2A"},
-		{"alt+left", Key{Code: CodeLeft, Mods: ModOption}, "\x1b[1;3D"},
+		{"alt+up", Key{Code: CodeUp, Mods: ModOption}, "\x1b[1;3A"},
 		{"ctrl+right", Key{Code: CodeRight, Mods: ModControl}, "\x1b[1;5C"},
 		{"ctrl+shift+down", Key{Code: CodeDown, Mods: ModControl | ModShift}, "\x1b[1;6B"},
 		{"shift+home", Key{Code: CodeHome, Mods: ModShift}, "\x1b[1;2H"},

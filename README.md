@@ -91,6 +91,10 @@ cp -R build/Shellter.app /Applications/
 | Split right / split down | `Cmd+D` / `Cmd+Shift+D` |
 | Move focus between panes | `Cmd+Option+Arrow` |
 | Swap panes | `Cmd+Option+Shift+Arrow` |
+| Move by word | `Option+Left` / `Option+Right` |
+| Delete a word | `Option+Delete` |
+| Start or end of the line | `Cmd+Left` / `Cmd+Right` |
+| Delete the line | `Cmd+Delete` |
 | Zoom pane | `Cmd+Shift+Return` |
 | Find / next / previous | `Cmd+F` / `Cmd+G` / `Cmd+Shift+G` |
 | Copy / paste / select all | `Cmd+C` / `Cmd+V` / `Cmd+A` |

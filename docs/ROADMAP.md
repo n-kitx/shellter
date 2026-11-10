@@ -58,7 +58,12 @@ rather than rediscovering the state by reading the code.
       the input system while nothing is being composed. Press-and-hold is
       off by default so held keys repeat.
 - [x] Option-as-Meta setting (`option-as-meta = true`): ESC prefix for
-      letters, Return, Tab, Delete, Escape; arrows keep their parameter.
+      letters, Return, Tab, Delete, Escape; arrows keep their parameter,
+      but for the text-editing shortcuts below.
+- [x] Mac text-editing shortcuts, with or without Option-as-Meta:
+      Option+Left/Right move by word, Option+Delete deletes a word,
+      Cmd+Left/Right go to the start or end of the line, Cmd+Delete deletes
+      the line.
 - [x] Application keypad mode (`ESC =`, `?66`): the keypad sends `ESC O p`...
       to full-screen programs. Not at a shell prompt, where oh-my-zsh's smkx
       turns it on without binding any of it.

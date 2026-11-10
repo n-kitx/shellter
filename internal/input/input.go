@@ -120,8 +120,12 @@ const (
 // Encode returns the bytes to write to the PTY, or nil if the key sends
 // nothing.
 func Encode(k Key, m Mode) []byte {
-	// Command is the window manager's, never the terminal's: Cmd+Q quits,
-	// Cmd+C copies. None of it reaches the shell.
+	if b := textEditingKey(k); b != nil {
+		return b
+	}
+
+	// Otherwise Command is the window manager's, never the terminal's: Cmd+Q
+	// quits, Cmd+C copies. None of it reaches the shell.
 	if k.Mods.Has(ModCommand) {
 		return nil
 	}
@@ -129,7 +133,7 @@ func Encode(k Key, m Mode) []byte {
 	// Meta is ESC and then the key as it would be without it: Option+B is
 	// "ESC b", which zsh reads as back-a-word, and Option+Delete is "ESC DEL",
 	// delete-a-word. Keys that already carry their modifiers in a parameter -
-	// arrows, function keys - keep doing that instead.
+	// function keys, the arrows but for textEditingKey's - keep doing that.
 	if m.ApplicationKeypad && k.Keypad {
 		if b, ok := keypadKey(k); ok {
 			return b
@@ -238,6 +242,35 @@ func Encode(k Key, m Mode) []byte {
 
 	// Anything else is text: send it as UTF-8, exactly as typed.
 	return []byte(string(k.Chars))
+}
+
+// textEditingKey is the bytes for the shortcuts every Mac text field has, or nil
+// if k is not one. A shell has no idea what Option+Left means - xterm's
+// "ESC [ 1 ; 3 D" is bound to nothing - so they are sent as the Emacs keys that
+// zsh, bash and most line editors already read. Any other modifier held too
+// makes it a different key.
+func textEditingKey(k Key) []byte {
+	switch k.Mods {
+	case ModOption:
+		switch k.Code {
+		case CodeLeft:
+			return []byte{esc, 'b'} // back a word
+		case CodeRight:
+			return []byte{esc, 'f'} // forward a word
+		case CodeBackspace:
+			return []byte{esc, del} // delete the word before the cursor
+		}
+	case ModCommand:
+		switch k.Code {
+		case CodeLeft:
+			return []byte{0x01} // Ctrl+A, start of line
+		case CodeRight:
+			return []byte{0x05} // Ctrl+E, end of line
+		case CodeBackspace:
+			return []byte{0x15} // Ctrl+U, delete the line
+		}
+	}
+	return nil
 }
 
 // keypadFinals are the SS3 finals the keypad sends in application mode, by

@@ -148,10 +148,36 @@ func TestCommandIsNeverSentToTheShell(t *testing.T) {
 	for _, k := range []Key{
 		key('q', ModCommand),
 		key('c', ModCommand),
-		{Code: CodeLeft, Mods: ModCommand},
+		{Code: CodeUp, Mods: ModCommand},
+		{Code: CodeLeft, Mods: ModCommand | ModShift},
 	} {
 		if got := Encode(k, Mode{}); got != nil {
 			t.Fatalf("%+v produced % x, want nothing", k, got)
+		}
+	}
+}
+
+// The Mac's text-editing shortcuts are sent as the keys a line editor reads,
+// with Option as Meta or without it.
+func TestTextEditingShortcuts(t *testing.T) {
+	cases := []struct {
+		name string
+		key  Key
+		want string
+	}{
+		{"option+left", Key{Code: CodeLeft, Mods: ModOption}, "\x1bb"},
+		{"option+right", Key{Code: CodeRight, Mods: ModOption}, "\x1bf"},
+		{"option+delete", Key{Code: CodeBackspace, Mods: ModOption}, "\x1b\x7f"},
+		{"cmd+left", Key{Code: CodeLeft, Mods: ModCommand}, "\x01"},
+		{"cmd+right", Key{Code: CodeRight, Mods: ModCommand}, "\x05"},
+		{"cmd+delete", Key{Code: CodeBackspace, Mods: ModCommand}, "\x15"},
+		{"option+shift+left is a different key", Key{Code: CodeLeft, Mods: ModOption | ModShift}, "\x1b[1;4D"},
+	}
+	for _, c := range cases {
+		for _, m := range []Mode{{}, {OptionAsMeta: true}, {ApplicationCursor: true}} {
+			if got := string(Encode(c.key, m)); got != c.want {
+				t.Errorf("%s in %+v = %q, want %q", c.name, m, got, c.want)
+			}
 		}
 	}
 }
@@ -207,7 +233,8 @@ func TestPagingAndHomeEndKeys(t *testing.T) {
 }
 
 // With Option as Meta, Option+key is ESC then the key - letters, Delete,
-// Return - while arrows keep their modifier parameter. Without it, Option
+// Return - while arrows other than Left and Right keep their modifier
+// parameter. Without it, Option
 // types what macOS composed.
 func TestOptionAsMeta(t *testing.T) {
 	meta := Mode{OptionAsMeta: true}
@@ -220,7 +247,7 @@ func TestOptionAsMeta(t *testing.T) {
 		{Key{Code: CodeBackspace, Base: 0x7f, Mods: ModOption}, "\x1b\x7f"},
 		{Key{Code: CodeReturn, Base: 0x0d, Mods: ModOption}, "\x1b\r"},
 		{Key{Chars: []rune{'c'}, Base: 'c', Mods: ModOption | ModControl}, "\x1b\x03"},
-		{Key{Code: CodeLeft, Mods: ModOption}, "\x1b[1;3D"},
+		{Key{Code: CodeUp, Mods: ModOption}, "\x1b[1;3A"},
 	}
 	for _, c := range cases {
 		if got := string(Encode(c.key, meta)); got != c.want {
